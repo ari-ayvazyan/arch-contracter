@@ -27,6 +27,10 @@ export function createHandler(file = dataFile) {
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff'
       });
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
       res.end(type.startsWith('application/json') ? JSON.stringify(value) : value);
     };
 
@@ -48,13 +52,15 @@ export function createHandler(file = dataFile) {
         }
       }
 
-      const rawUrl = req.headers['x-forwarded-url'] || req.headers['x-original-url'] || req.headers['x-matched-path'] || req.url;
-      let pathname = new URL(rawUrl, `http://${host}`).pathname;
+      const rawUrl = req.headers['x-forwarded-url'] || req.headers['x-original-url'] || req.url;
+      const parsedUrl = new URL(rawUrl, `http://${host}`);
+      let pathname = parsedUrl.searchParams.get('path') || parsedUrl.pathname;
+      if (pathname && !pathname.startsWith('/')) pathname = `/${pathname}`;
       if (pathname === '/server.mjs') pathname = '/';
 
       const workingFile = getWorkingFile(file);
 
-      if (pathname === '/api/document' && req.method === 'GET') {
+      if (pathname === '/api/document' && (req.method === 'GET' || req.method === 'HEAD')) {
         let raw;
         try {
           raw = await readFile(workingFile, 'utf8');
@@ -125,7 +131,7 @@ export function createHandler(file = dataFile) {
         return;
       }
 
-      if (req.method !== 'GET') return send(405, { error: 'Methode nicht erlaubt.' });
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, { error: 'Methode nicht erlaubt.' });
 
       const files = {
         '/': 'index.html',

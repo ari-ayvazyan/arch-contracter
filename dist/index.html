@@ -11,7 +11,7 @@
   <div id="app">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Arch-Contracter"><span class="brand-icon">⌘</span><span>arch<span class="brand-light"> / contracter</span></span></a>
-      <span class="local-label">LOKALER ARBEITSBEREICH</span>
+      <span class="local-label">BROWSER-SPEICHER</span>
       <div class="top-actions"><span id="save-status" role="status">Wird geladen …</span><button id="save" class="quiet">Speichern <kbd>Ctrl S</kbd></button><button id="preview" class="primary">▤ <span>PDF-Vorschau</span> <span>↗</span></button></div>
     </header>
     <div id="notice" class="notice" hidden role="alert"></div>
@@ -21,7 +21,7 @@
         <button class="nav active" data-view="map"><span>⌘</span> Paketbaum <span class="nav-count" id="node-count">0</span></button>
         <button class="nav" data-view="questions"><span>?</span> Offene Fragen <span class="nav-count amber" id="question-count">0</span></button>
         <div class="sidebar-section"><div class="sidebar-heading">VERTRAGSUMFÄNGE</div><div id="contracts"></div></div>
-        <div class="sidebar-bottom"><div class="file-indicator"><span class="file-dot"></span><div><strong>lastenheft.json</strong><small>Lokale Datenquelle</small></div></div><button id="reload" class="text-button">↻ Datei neu laden</button><button id="download" class="text-button">↓ JSON-Entwurf sichern</button><p class="sidebar-hint">Änderungen an der Datei werden erkannt. Kein Konto. Keine Cloud.</p></div>
+        <div class="sidebar-bottom"><div class="file-indicator"><span class="file-dot"></span><div><strong>Browser-Speicher</strong><small>Lokale Datenquelle</small></div></div><button id="upload" class="text-button">↑ JSON hochladen</button><button id="download" class="text-button">↓ JSON herunterladen</button><button id="reload" class="text-button">↻ Gespeicherten Stand laden</button><button id="reset-default" class="text-button">↶ Auf Vorlage zurücksetzen</button><p class="sidebar-hint">Daten werden lokal im Browser gespeichert. Kein Konto. Keine Cloud.</p><input type="file" id="upload-input" accept=".json,application/json" hidden></div>
       </aside>
       <main class="main">
         <div class="main-heading"><div><div class="eyebrow">LASTENHEFT / <span id="scope-label">GESAMTÜBERSICHT</span></div><h1 id="document-title">Lastenheft</h1></div><button id="document-edit" class="quiet" title="Dokumentangaben bearbeiten">Dokumentangaben ↗</button></div>

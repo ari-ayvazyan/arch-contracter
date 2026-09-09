@@ -1,14 +1,15 @@
-import { types, validate, children, descendants, effectiveContract, moveNode, removeNode, exportSelection, documentHtml, escapeHtml as e } from './model.js';
+import { types, validate, children, descendants, effectiveContract, moveNode, removeNode, exportSelection, documentHtml, escapeHtml as e, defaultTemplate } from './model.js';
 import { paginateDocument } from './pagination.js';
 
 const $ = selector => document.querySelector(selector);
-let data, revision, selected, dirty = false, saving = false, conflict = false, view = 'map', scope = '*', search = '', collapsed = new Set();
+let data, selected, dirty = false, saving = false, conflict = false, view = 'map', scope = '*', search = '', collapsed = new Set();
 let undo = [], redo = [], zoom = 1, pan = { x: 45, y: 70 }, positions = new Map(), bounds = { width: 1000, height: 700 }, dragged = null;
 // View-only offsets: never part of document data, drafts, or localStorage.
 const nodeOffsets = new Map();
 let nodeDrag = null, ignoreNodeClickUntil = 0;
 let dependencyDraft = null;
-const storageKey = `arch-contracter-draft:${location.port}`;
+const storageKey = `arch-contracter-data${location.port ? `:${location.port}` : ''}`;
+const draftKey = `arch-contracter-draft${location.port ? `:${location.port}` : ''}`;
 const clone = value => structuredClone(value);
 const node = id => data.nodes.find(n => n.id === id);
 const selectedNode = () => node(selected);
@@ -18,9 +19,9 @@ const contracts = () => [...new Set(data.nodes.map(n => effectiveContract(data, 
 const isEditing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
 let toastTimer;
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').hidden = true, 4500); }
-function notice(message) { $('#notice').hidden = !message; $('#notice').innerHTML = message ? `<span>${e(message)}</span><button data-action="reload">Dateistand laden</button><button data-action="download">Entwurf sichern</button>` : ''; }
-function backup() { try { localStorage.setItem(storageKey, JSON.stringify({ data, revision })); } catch { toast('Lokale Wiederherstellung nicht verfügbar. Bitte speichern.'); } }
-function updateSaveStatus() { $('#save-status').textContent = saving ? 'Speichert …' : conflict ? 'Dateikonflikt' : dirty ? 'Ungespeichert' : '✓ Gespeichert'; $('#save-status').classList.toggle('dirty', dirty || conflict); $('#save').disabled = saving || !data; }
+function notice(message) { $('#notice').hidden = !message; $('#notice').innerHTML = message ? `<span>${e(message)}</span><button data-action="reload">Stand laden</button><button data-action="download">JSON herunterladen</button>` : ''; }
+function backup() { try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { toast('Lokale Wiederherstellung nicht verfügbar. Bitte speichern.'); } }
+function updateSaveStatus() { $('#save-status').textContent = saving ? 'Speichert …' : conflict ? 'Konflikt' : dirty ? 'Ungespeichert' : '✓ Gespeichert'; $('#save-status').classList.toggle('dirty', dirty || conflict); $('#save').disabled = saving || !data; }
 function checkpoint() { undo.push(clone(data)); if (undo.length > 80) undo.shift(); redo = []; }
 function changed() { dirty = true; backup(); updateSaveStatus(); renderOverview(); }
 function mutate(fn, inspect = true) {
@@ -29,29 +30,151 @@ function mutate(fn, inspect = true) {
   catch (error) { data = previous; toast(error.message); }
 }
 async function load(force = false) {
-  if (data && dirty && !force && !confirm('Ungespeicherte Änderungen verwerfen und den aktuellen Dateistand laden? Sichere bei Bedarf zuerst den JSON-Entwurf.')) return;
+  if (data && dirty && !force && !confirm('Ungespeicherte Änderungen verwerfen und den gespeicherten Stand laden? Sichere bei Bedarf zuerst den JSON-Entwurf.')) return;
   try {
-    const response = await fetch('/api/document'); const payload = await response.json(); if (!response.ok) throw new Error(payload.error);
-    validate(payload.data); data = payload.data; revision = payload.revision; dirty = false; conflict = false; undo = []; redo = [];
+    let raw = null;
+    try { raw = localStorage.getItem(storageKey); } catch {}
+    let loadedData = null;
+    if (raw) {
+      try {
+        loadedData = JSON.parse(raw);
+        validate(loadedData);
+      } catch {
+        loadedData = null;
+      }
+    }
+    if (!loadedData) {
+      try {
+        const response = await fetch('/api/document');
+        if (response.ok) {
+          const payload = await response.json();
+          validate(payload.data);
+          loadedData = payload.data;
+        }
+      } catch {}
+    }
+    if (!loadedData) {
+      loadedData = clone(defaultTemplate);
+      validate(loadedData);
+    }
+    data = loadedData;
+    try {
+      if (!raw) localStorage.setItem(storageKey, JSON.stringify(data));
+      localStorage.removeItem(draftKey);
+    } catch {}
+    dirty = false;
+    conflict = false;
+    undo = [];
+    redo = [];
     if (!selected || !node(selected)) selected = root().id;
-    notice(''); updateSaveStatus(); renderOverview(); renderInspector(); fit();
-    try { localStorage.removeItem(storageKey); } catch {}
-  } catch (error) { notice(`Datei konnte nicht geladen werden: ${error.message}`); }
+    notice('');
+    updateSaveStatus();
+    renderOverview();
+    renderInspector();
+    fit();
+  } catch (error) {
+    notice(`Daten konnten nicht geladen werden: ${error.message}`);
+  }
 }
 async function save() {
   if (!data || saving) return;
   try { validate(data); } catch (error) { return toast(error.message); }
-  saving = true; updateSaveStatus(); const snapshot = JSON.stringify(data);
+  saving = true; updateSaveStatus();
   try {
-    const response = await fetch('/api/document', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data, revision }) });
-    const payload = await response.json();
-    if (!response.ok) { if (response.status === 409) conflict = true; throw new Error(payload.error); }
-    revision = payload.revision; dirty = JSON.stringify(data) !== snapshot; conflict = false; notice('');
-    if (dirty) backup(); else try { localStorage.removeItem(storageKey); } catch {}
-    toast('In data/lastenheft.json gespeichert.');
-  } catch (error) { notice(error.message); } finally { saving = false; updateSaveStatus(); }
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    try { localStorage.removeItem(draftKey); } catch {}
+    dirty = false;
+    conflict = false;
+    notice('');
+    toast('Im Browser-Speicher gespeichert.');
+  } catch (error) {
+    notice(`Speichern im Browser fehlgeschlagen: ${error.message}`);
+  } finally {
+    saving = false;
+    updateSaveStatus();
+  }
 }
-function download() { if (!data) return; const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'lastenheft-entwurf.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function download() {
+  if (!data) return;
+  const json = JSON.stringify(data, null, 2) + '\n';
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const slug = (data.document?.title || 'lastenheft').toLowerCase().trim().replace(/[^a-z0-9äöüß_-]+/gi, '-').replace(/^-+|-+$/g, '');
+  a.download = `${slug || 'lastenheft'}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`JSON heruntergeladen: ${a.download}`);
+}
+async function uploadFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    let imported;
+    try {
+      imported = JSON.parse(text);
+    } catch {
+      throw new Error('Die ausgewählte Datei enthält kein gültiges JSON.');
+    }
+    validate(imported);
+    if (dirty && !confirm('Ungespeicherte Änderungen werden überschrieben. Fortfahren?')) return;
+    data = imported;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      localStorage.removeItem(draftKey);
+    } catch {}
+    dirty = false;
+    conflict = false;
+    undo = [];
+    redo = [];
+    selected = root().id;
+    notice('');
+    updateSaveStatus();
+    renderOverview();
+    renderInspector();
+    fit();
+    toast(`„${file.name}“ erfolgreich geladen.`);
+  } catch (error) {
+    toast(`Fehler beim Laden der Datei: ${error.message}`);
+  } finally {
+    const input = $('#upload-input');
+    if (input) input.value = '';
+  }
+}
+async function resetToDefault() {
+  if (!confirm('Möchtest du wirklich alle Änderungen verwerfen und auf das Standard-Beispieldokument zurücksetzen? Ungespeicherte Änderungen gehen verloren. Sichere bei Bedarf zuerst deinen aktuellen Stand.')) return;
+  try {
+    let defaultData = null;
+    try {
+      const response = await fetch('/api/document');
+      if (response.ok) {
+        const payload = await response.json();
+        validate(payload.data);
+        defaultData = payload.data;
+      }
+    } catch {}
+    if (!defaultData) defaultData = clone(defaultTemplate);
+    data = defaultData;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      localStorage.removeItem(draftKey);
+    } catch {}
+    dirty = false;
+    conflict = false;
+    undo = [];
+    redo = [];
+    selected = root().id;
+    notice('');
+    updateSaveStatus();
+    renderOverview();
+    renderInspector();
+    fit();
+    toast('Auf Standard-Vorlage zurückgesetzt.');
+  } catch (error) {
+    toast(`Zurücksetzen fehlgeschlagen: ${error.message}`);
+  }
+}
 function select(id, center = false) { selected = id; if (center) { let current = node(id); while (current) { collapsed.delete(current.id); current = node(current.parentId); } } renderOverview(); renderInspector(); if (center && positions.has(id)) { const p = positions.get(id); pan = { x: $('#canvas').clientWidth / 2 - (p.x + 113) * zoom, y: $('#canvas').clientHeight / 2 - (p.y + 45) * zoom }; transform(); } }
 function setView(next) { cancelDependency(); view = next; renderOverview(); }
 function activeNodes() {
@@ -518,7 +641,15 @@ for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) $('#can
 $('#canvas').addEventListener('wheel', event => { event.preventDefault(); const rect = $('#canvas').getBoundingClientRect(); if (event.ctrlKey || event.metaKey) setZoom(zoom * Math.exp(-event.deltaY * .003), event.clientX - rect.left, event.clientY - rect.top); else { pan.x -= event.deltaX; pan.y -= event.deltaY; transform(); } }, { passive: false });
 $('#search').oninput = event => { search = event.target.value.toLocaleLowerCase('de'); renderOverview(); if (search) fit(); };
 $('#mobile-scope').onchange = event => { scope = event.target.value; renderOverview(); fit(); };
-$('#save').onclick = save; $('#reload').onclick = () => load(); $('#download').onclick = download;
+$('#save').onclick = save;
+$('#reload').onclick = () => load();
+$('#download').onclick = download;
+$('#upload').onclick = () => $('#upload-input')?.click();
+$('#upload-input')?.addEventListener('change', event => {
+  const file = event.target.files?.[0];
+  if (file) uploadFile(file);
+});
+$('#reset-default').onclick = resetToDefault;
 $('#undo').onclick = () => history('undo'); $('#redo').onclick = () => history('redo');
 $('#document-edit').onclick = () => select(root().id, true);
 $('#preview').onclick = () => openExport(); $('#close-export').onclick = () => $('#export-dialog').close();
@@ -529,14 +660,65 @@ $('#fullscreen').onclick = async () => { try { if (document.fullscreenElement) a
 document.addEventListener('keydown', event => { if (!(event.ctrlKey || event.metaKey)) return; if (event.key.toLowerCase() === 's') { event.preventDefault(); document.activeElement?.blur(); save(); } else if (event.key.toLowerCase() === 'z' && !isEditing() && !document.querySelector('dialog[open]')) { event.preventDefault(); history(event.shiftKey ? 'redo' : 'undo'); } });
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('beforeprint', () => { if (data && !$('#export-dialog').open) { $('#export-scope').innerHTML = '<option value="*">Gesamtes Lastenheft</option>'; renderExport(); } });
-async function poll() {
-  if (!data || saving || document.hidden || document.querySelector('dialog[open]')) return;
-  try { const response = await fetch('/api/document'); const payload = await response.json(); if (!response.ok) throw new Error(payload.error); if (payload.revision !== revision) { if (dirty || isEditing()) { conflict = true; notice('Die JSON-Datei wurde extern geändert. Sichere deinen Entwurf oder lade den Dateistand.'); updateSaveStatus(); } else { data = validate(payload.data); revision = payload.revision; if (!selectedNode()) selected = root().id; conflict = false; notice(''); renderOverview(); renderInspector(); updateSaveStatus(); toast('Externe Dateiänderungen übernommen.'); } } } catch (error) { notice(`Datenquelle nicht erreichbar oder ungültig: ${error.message}`); }
-}
+window.addEventListener('dragover', event => {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+});
+window.addEventListener('drop', event => {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    const file = event.dataTransfer.files?.[0];
+    if (file && (file.name.endsWith('.json') || file.type === 'application/json')) {
+      event.preventDefault();
+      uploadFile(file);
+    }
+  }
+});
+window.addEventListener('storage', event => {
+  if (event.key !== storageKey || !event.newValue) return;
+  try {
+    const updated = JSON.parse(event.newValue);
+    validate(updated);
+    if (dirty || isEditing()) {
+      conflict = true;
+      notice('Die Daten wurden in einem anderen Tab geändert. Sichere deinen Entwurf oder lade den Stand neu.');
+      updateSaveStatus();
+    } else {
+      data = updated;
+      if (!selectedNode()) selected = root().id;
+      conflict = false;
+      notice('');
+      renderOverview();
+      renderInspector();
+      updateSaveStatus();
+      toast('Änderungen aus anderem Tab übernommen.');
+    }
+  } catch {}
+});
 let recovered;
-try { recovered = JSON.parse(localStorage.getItem(storageKey)); } catch {}
+try {
+  const rawDraft = localStorage.getItem(draftKey);
+  if (rawDraft) recovered = JSON.parse(rawDraft);
+} catch {}
 await load(true);
-if (recovered?.data && data) {
-  try { validate(recovered.data); if (JSON.stringify(recovered.data) !== JSON.stringify(data) && confirm('Ein ungespeicherter Entwurf wurde gefunden. Wiederherstellen?')) { const diskRevision = revision; data = recovered.data; revision = recovered.revision; dirty = true; conflict = diskRevision !== revision; selected = root().id; if (conflict) notice('Der wiederhergestellte Entwurf basiert auf einem älteren Dateistand. Sichere ihn vor dem Neuladen.'); backup(); updateSaveStatus(); renderOverview(); renderInspector(); fit(); } } catch { toast('Der gespeicherte Entwurf konnte nicht wiederhergestellt werden.'); }
+if (recovered && data) {
+  try {
+    validate(recovered);
+    if (JSON.stringify(recovered) !== JSON.stringify(data) && confirm('Ein ungespeicherter Entwurf wurde gefunden. Wiederherstellen?')) {
+      data = recovered;
+      dirty = true;
+      selected = root().id;
+      backup();
+      updateSaveStatus();
+      renderOverview();
+      renderInspector();
+      fit();
+      toast('Ungespeicherter Entwurf wiederhergestellt.');
+    } else {
+      try { localStorage.removeItem(draftKey); } catch {}
+    }
+  } catch {
+    toast('Der gespeicherte Entwurf konnte nicht wiederhergestellt werden.');
+  }
 }
-setInterval(poll, 4000);

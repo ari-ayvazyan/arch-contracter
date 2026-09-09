@@ -116,6 +116,59 @@ test('Vercel Serverless: Direkte Ausführung als Funktion mit Vercel-Umgebung', 
     await defaultHandler(fallbackCall.req, fallbackCall.res);
     assert.equal(fallbackCall.res.statusCode, 200);
     assert.ok(fallbackCall.res.body.includes('Arch-Contracter'));
+
+    // 8. Vercel-Rewrite mit query-Parameter ?path=/styles.css und x-matched-path Header liefert CSS
+    const stylesCall = createMockReqRes({
+      method: 'GET',
+      url: '/server.mjs?path=/styles.css',
+      headers: { 'x-matched-path': '/server.mjs' }
+    });
+    await defaultHandler(stylesCall.req, stylesCall.res);
+    assert.equal(stylesCall.res.statusCode, 200);
+    assert.equal(stylesCall.res.headers['Content-Type'], 'text/css; charset=utf-8');
+    assert.ok(stylesCall.res.body.includes('--bg') || stylesCall.res.body.includes('body'));
+
+    // 9. Vercel-Rewrite für print.css
+    const printCall = createMockReqRes({
+      method: 'GET',
+      url: '/server.mjs?path=/print.css',
+      headers: { 'x-matched-path': '/server.mjs' }
+    });
+    await defaultHandler(printCall.req, printCall.res);
+    assert.equal(printCall.res.statusCode, 200);
+    assert.equal(printCall.res.headers['Content-Type'], 'text/css; charset=utf-8');
+
+    // 10. Vercel-Rewrite für model.js und pagination.js
+    const modelCall = createMockReqRes({
+      method: 'GET',
+      url: '/server.mjs?path=/model.js',
+      headers: { 'x-matched-path': '/server.mjs' }
+    });
+    await defaultHandler(modelCall.req, modelCall.res);
+    assert.equal(modelCall.res.statusCode, 200);
+    assert.equal(modelCall.res.headers['Content-Type'], 'text/javascript; charset=utf-8');
+
+    // 11. Vercel-Rewrite für /api/document via ?path=/api/document
+    const apiRewrittenCall = createMockReqRes({
+      method: 'GET',
+      url: '/server.mjs?path=/api/document',
+      headers: { 'x-matched-path': '/server.mjs' }
+    });
+    await defaultHandler(apiRewrittenCall.req, apiRewrittenCall.res);
+    assert.equal(apiRewrittenCall.res.statusCode, 200);
+    assert.equal(apiRewrittenCall.res.headers['Content-Type'], 'application/json; charset=utf-8');
+    const apiBody = JSON.parse(apiRewrittenCall.res.body);
+    assert.ok(apiBody.revision);
+
+    // 12. HEAD-Request auf CSS liefert Status 200 ohne Body
+    const headCall = createMockReqRes({
+      method: 'HEAD',
+      url: '/server.mjs?path=/styles.css'
+    });
+    await defaultHandler(headCall.req, headCall.res);
+    assert.equal(headCall.res.statusCode, 200);
+    assert.equal(headCall.res.headers['Content-Type'], 'text/css; charset=utf-8');
+    assert.equal(headCall.res.body, '');
   } finally {
     if (prevVercel !== undefined) process.env.VERCEL = prevVercel;
     else delete process.env.VERCEL;
