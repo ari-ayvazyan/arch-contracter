@@ -1,0 +1,22 @@
+.pdf-stage{position:fixed;left:-20000px;top:0;visibility:hidden;pointer-events:none;width:210mm}
+.pdf-page{position:relative;box-sizing:border-box;width:210mm;height:297mm;padding:18mm 18mm 22mm;background:#fff;color:#243b33;flex-shrink:0;margin:0 auto 24px;box-shadow:0 4px 22px #173e3520}
+.pdf-page .document.pdf-page-body{box-sizing:border-box;width:174mm;height:257mm;max-width:none;margin:0;padding:0;box-shadow:none;display:flow-root;background:#fff;font-family:Georgia,'Times New Roman',serif;font-size:11pt;line-height:1.55;overflow-wrap:anywhere}
+.pdf-page h1,.pdf-page h2,.pdf-page h3,.pdf-page .doc-eyebrow,.pdf-page dl,.pdf-page .doc-subtitle{font-family:Segoe UI,Arial,sans-serif}
+.pdf-page h1{font-size:29pt;line-height:1.15;letter-spacing:-.7px;margin:18px 0}.pdf-page h2{font-size:16pt;line-height:1.3;letter-spacing:-.3px;margin:7px 0 14px}.pdf-page h3{font-size:10.5pt;line-height:1.4;margin:17px 0 7px}
+.pdf-page p{margin:8px 0}.pdf-page ul,.pdf-page ol{padding-left:23px;margin:6px 0}.pdf-page li{margin:4px 0}
+.pdf-page .doc-eyebrow{font-size:8pt;line-height:1.4;letter-spacing:1.2px;text-transform:uppercase;color:#69816e}.pdf-page .doc-subtitle{font-size:14pt;color:#66816b}.pdf-page dl{display:flex;flex-wrap:wrap;gap:22px;margin:26px 0;font-size:10pt}.pdf-page dt{color:#7e8a7e;margin-bottom:5px}.pdf-page dd{margin:0;font-weight:600}
+.pdf-page .pdf-flow{display:flow-root;margin:0;padding:0;border:0;break-inside:avoid}.pdf-page .doc-cover.flow-start{padding-top:20mm}.pdf-page .doc-section.flow-start{margin-top:18px;padding-top:16px;border-top:1px solid #dce4d9}.pdf-page-body>.doc-section.flow-start:first-child{margin-top:0}
+.pdf-page .doc-toc ol{list-style:none;padding:0;font-family:Segoe UI,Arial,sans-serif;font-size:10.5pt}.pdf-page .doc-toc .level-2{padding-left:18px}.pdf-page .doc-toc .level-3{padding-left:36px}.pdf-page .doc-toc a{color:inherit;text-decoration:none}
+.pdf-page .preserve{white-space:pre-wrap}.pdf-page .muted{color:#7b8878;font-style:italic}.pdf-page .doc-warning{border-left:3px solid #b68339;padding-left:12px;background:#fcf5e7;font-size:10pt}
+.pdf-page-footer{position:absolute;left:18mm;right:18mm;bottom:9mm;display:flex;align-items:flex-end;gap:12px;border-top:1px solid #dce4d9;padding-top:3mm;color:#64745f;font:8pt/1.4 Segoe UI,Arial,sans-serif}.pdf-page-footer>span:first-child{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.pdf-page-number{white-space:nowrap}
+#preview-content{overflow:auto}.pdf-page:last-child{margin-bottom:0}
+@page{size:A4;margin:0}
+@media print{
+html,body{background:white!important;margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}
+body>*:not(#export-dialog):not(.pdf-stage){display:none!important}
+#export-dialog{display:block!important;position:static!important;width:auto!important;max-width:none!important;height:auto!important;max-height:none!important;overflow:visible!important;border:0!important;padding:0!important;margin:0!important;background:white!important;border-radius:0!important}
+#export-dialog::backdrop{display:none!important}#export-dialog>*:not(#preview-content){display:none!important}
+#preview-content{padding:0!important;margin:0!important;overflow:visible!important}
+.pdf-page{margin:0!important;box-shadow:none!important;break-after:page;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pdf-page:last-child{break-after:auto}
+}

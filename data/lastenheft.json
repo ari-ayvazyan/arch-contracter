@@ -1,0 +1,150 @@
+{
+  "$schema": "../lastenheft.schema.json",
+  "schemaVersion": 1,
+  "document": {
+    "title": "Kundenportal",
+    "customer": "Musterkunde · bitte ersetzen",
+    "version": "0.1 – Entwurf",
+    "date": "2026-09-09"
+  },
+  "nodes": [
+    {
+      "id": "kundenportal",
+      "parentId": null,
+      "type": "document",
+      "title": "Kundenportal",
+      "description": "Das Kundenportal bündelt den geschützten Zugang zu Dokumenten und Informationen. Dieses Beispieldokument dient als Ausgangspunkt für die gemeinsame Abstimmung des Leistungsumfangs.",
+      "criteria": [],
+      "exclusions": "Laufender Betrieb und Support sind nicht Teil dieses Leistungsumfangs und werden gesondert vereinbart.",
+      "notes": "Beispieldaten: Titel, Kunde und Inhalte vor dem Versand anpassen.",
+      "effort": null,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "basisprojekt",
+      "parentId": "kundenportal",
+      "type": "group",
+      "title": "Basisprojekt",
+      "description": "Grundfunktionen für den sicheren Zugang und die gemeinsame Dokumentenablage.",
+      "criteria": [],
+      "exclusions": "",
+      "notes": "",
+      "effort": null,
+      "contract": "Hauptvertrag",
+      "questions": []
+    },
+    {
+      "id": "benutzerverwaltung",
+      "parentId": "basisprojekt",
+      "type": "package",
+      "title": "Benutzerverwaltung",
+      "description": "Berechtigte Personen können sich anmelden. Administrierende verwalten Zugänge und weisen Rollen zu.",
+      "criteria": [],
+      "exclusions": "",
+      "notes": "Die Benutzerverwaltung ist eine beispielhafte Kundenanforderung, keine Funktion dieses Editors.",
+      "effort": 2,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "anmeldung",
+      "parentId": "benutzerverwaltung",
+      "type": "requirement",
+      "title": "Anmeldung",
+      "description": "Eingeladene Personen melden sich mit E-Mail-Adresse und Passwort am Kundenportal an. Ein vergessenes Passwort kann über einen zeitlich begrenzten Link zurückgesetzt werden.",
+      "criteria": ["Gültige Zugangsdaten ermöglichen die Anmeldung.", "Ungültige Zugangsdaten führen zu einer verständlichen Fehlermeldung.", "Ein Passwort kann über die hinterlegte E-Mail-Adresse zurückgesetzt werden."],
+      "exclusions": "Anmeldung über soziale Netzwerke ist nicht enthalten.",
+      "notes": "",
+      "effort": 2,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "rollen-rechte",
+      "parentId": "benutzerverwaltung",
+      "type": "requirement",
+      "title": "Rollen & Rechte",
+      "description": "Das System ermöglicht die Verwaltung von Benutzerrollen und zugehörigen Zugriffsrechten. Personen erhalten ausschließlich Zugriff auf die für ihre Rolle freigegebenen Bereiche.",
+      "criteria": ["Administrierende können Personen eine Rolle zuweisen.", "Nicht freigegebene Inhalte sind weder über die Oberfläche noch über direkte Links zugänglich."],
+      "exclusions": "Ein frei konfigurierbarer Berechtigungseditor ist nicht enthalten.",
+      "notes": "Klären, ob eine mandantenfähige Rollenstruktur erforderlich ist. Aufwand nach Klärung der Rollen erneut prüfen.",
+      "effort": 2,
+      "contract": "",
+      "questions": [
+        { "id": "q-standardrollen", "text": "Welche Standardrollen werden zum Projektstart benötigt?", "answer": "", "status": "open", "visibility": "customer" },
+        { "id": "q-verzeichnis", "text": "Ist eine Anbindung an das bestehende Active Directory vorgesehen?", "answer": "", "status": "open", "visibility": "customer" }
+      ]
+    },
+    {
+      "id": "dokumentenablage",
+      "parentId": "basisprojekt",
+      "type": "package",
+      "title": "Dokumentenablage",
+      "description": "Dokumente werden zentral abgelegt und berechtigten Personen zum Download bereitgestellt.",
+      "criteria": [],
+      "exclusions": "",
+      "notes": "",
+      "effort": 2,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "dateien-hochladen",
+      "parentId": "dokumentenablage",
+      "type": "requirement",
+      "title": "Dateien hochladen",
+      "description": "Berechtigte Personen können PDF-Dokumente hochladen, benennen und wieder herunterladen. Der Upload zeigt Fortschritt und Fehler verständlich an.",
+      "criteria": ["PDF-Dateien bis 20 MB können hochgeladen werden.", "Nicht unterstützte Dateitypen werden mit einer Meldung abgewiesen.", "Hochgeladene Dateien sind für berechtigte Personen abrufbar."],
+      "exclusions": "Automatische Texterkennung und Dokumentbearbeitung sind nicht enthalten.",
+      "notes": "",
+      "effort": 2,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "zusatzmodule",
+      "parentId": "kundenportal",
+      "type": "group",
+      "title": "Zusatzmodule",
+      "description": "Separat beauftragbare Erweiterungen nach Bereitstellung des Basisprojekts.",
+      "criteria": [],
+      "exclusions": "",
+      "notes": "Diese Gruppe hat einen eigenen Vertragsumfang und kann separat exportiert werden.",
+      "effort": null,
+      "contract": "Erweiterungen",
+      "questions": []
+    },
+    {
+      "id": "crm-anbindung",
+      "parentId": "zusatzmodule",
+      "type": "package",
+      "title": "CRM-Anbindung",
+      "description": "Kundenstammdaten werden über eine bereitgestellte Schnittstelle aus dem bestehenden CRM übernommen.",
+      "criteria": ["Neue und geänderte Kundenstammdaten können importiert werden.", "Fehlerhafte Datensätze werden nachvollziehbar protokolliert."],
+      "exclusions": "Bereinigung historischer Stammdaten und Lizenzkosten des CRM sind nicht enthalten.",
+      "notes": "",
+      "effort": 3,
+      "contract": "",
+      "questions": []
+    },
+    {
+      "id": "benachrichtigungen",
+      "parentId": "zusatzmodule",
+      "type": "package",
+      "title": "Benachrichtigungen",
+      "description": "Berechtigte Personen erhalten eine E-Mail, wenn neue Dokumente für sie bereitgestellt wurden.",
+      "criteria": ["Ein neues Dokument löst eine Nachricht an die zugeordneten Personen aus.", "Die Nachricht enthält einen Link zum Dokument im geschützten Portal."],
+      "exclusions": "SMS und Push-Nachrichten sind nicht enthalten.",
+      "notes": "",
+      "effort": 1,
+      "contract": "",
+      "questions": []
+    }
+  ],
+  "links": [
+    { "id": "link-basis", "source": "zusatzmodule", "target": "basisprojekt", "type": "requires" },
+    { "id": "link-crm", "source": "crm-anbindung", "target": "benutzerverwaltung", "type": "requires" },
+    { "id": "link-dokumente", "source": "benachrichtigungen", "target": "dokumentenablage", "type": "requires" }
+  ]
+}

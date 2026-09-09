@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import { mkdir, readFile } from 'node:fs/promises';
+import { createServer } from '../server.mjs';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const server = createServer();
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+const errors = []; page.on('pageerror', error => errors.push(error.message));
+await mkdir('test-results/pdf', { recursive: true });
+try {
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#preview').click();
+  await page.locator('.pdf-page').first().waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  const audit = () => page.evaluate(() => [...document.querySelectorAll('#preview-content .pdf-page')].map(p => {
+    const body = p.querySelector('.pdf-page-body'), rect = body.getBoundingClientRect();
+    return { overflow: Math.max(0, ...[...body.children].map(c => c.getBoundingClientRect().bottom - rect.bottom)), text: body.textContent, width: p.getBoundingClientRect().width, height: p.getBoundingClientRect().height, footer: p.querySelector('.pdf-page-number').textContent };
+  }));
+  let pages = await audit(); assert.ok(pages.length >= 3); assert.ok(pages.every(p => p.overflow <= .5 && p.text.trim()));
+  const baseline = pages.map(p => p.text);
+  await page.emulateMedia({ media: 'print' });
+  assert.deepEqual((await audit()).map(p => p.text), baseline);
+  await page.pdf({ path: 'test-results/pdf/lastenheft.pdf', preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+  await page.emulateMedia({ media: 'screen' });
+  await page.locator('.pdf-page').nth(2).screenshot({ path: 'test-results/pdf/preview-page-3.png' });
+  const stress = await page.evaluate(async () => {
+    const { documentHtml } = await import('/model.js'); const { paginateDocument } = await import('/pagination.js');
+    const { data } = await (await fetch('/api/document')).json();
+    const n = data.nodes.find(n => n.type === 'requirement');
+    n.description = 'STARTLANG ' + 'Eine ausführliche Anforderung muss vollständig lesbar bleiben und an Wortgrenzen auf Folgeseiten fortgesetzt werden. '.repeat(170) + ' ENDELANG';
+    n.criteria = Array.from({ length: 55 }, (_, i) => `Kriterium ${i + 1}: ` + 'Die Abnahme erfolgt anhand der vereinbarten fachlichen Vorgaben. '.repeat(5));
+    n.criteria.push('STARTPUNKT ' + 'Auch überlange Aufzählungspunkte müssen vollständig erhalten bleiben. '.repeat(110) + ' ENDEPUNKT');
+    n.questions.push({ id: 'long-question', text: 'STARTFRAGE ' + 'Welche Rahmenbedingungen gelten für die Abnahme? '.repeat(130) + ' ENDEFRAGE', answer: '', status: 'open' });
+    const source = document.createElement('div'); source.innerHTML = documentHtml(data);
+    const expected = source.textContent.replace(/\s/g, '');
+    paginateDocument(source.innerHTML, document.querySelector('#preview-content'));
+    const actual = [...document.querySelectorAll('.pdf-page-body')].map(n => n.textContent).join('').replace(/\s/g, '');
+    const footer = source.querySelector('.doc-footer').textContent.replace(/\s/g, '');
+    return { expected: expected.slice(0, -footer.length), actual };
+  });
+  assert.equal(stress.actual, stress.expected, 'No document text may disappear during pagination');
+  pages = await audit(); assert.ok(pages.length > baseline.length); assert.ok(pages.every(p => p.overflow <= .5 && p.text.trim()));
+  const stressBaseline = pages.map(p => p.text);
+  await page.emulateMedia({ media: 'print' });
+  assert.deepEqual((await audit()).map(p => p.text), stressBaseline);
+  await page.pdf({ path: 'test-results/pdf/long-content.pdf', preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ normalPages: baseline.length, longContentPages: pages.length, noOverflow: true, fullTextPreserved: true, printMatchesPreview: true }));
+} finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
