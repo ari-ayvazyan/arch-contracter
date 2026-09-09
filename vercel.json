@@ -6,10 +6,7 @@
   ],
   "functions": {
     "server.mjs": {
-      "includeFiles": [
-        "data/**",
-        "dist/**"
-      ]
+      "includeFiles": "{data/**,dist/**}"
     }
   }
 }

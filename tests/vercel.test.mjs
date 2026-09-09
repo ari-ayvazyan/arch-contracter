@@ -124,3 +124,13 @@ test('Vercel Serverless: Direkte Ausführung als Funktion mit Vercel-Umgebung', 
     await import('node:fs/promises').then(fs => fs.rm(tempDir, { recursive: true, force: true }));
   }
 });
+
+test('Vercel Config: vercel.json hat ein gültiges Schema und includeFiles ist ein String', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+
+  assert.equal(typeof config.functions?.['server.mjs']?.includeFiles, 'string');
+  assert.ok(config.functions['server.mjs'].includeFiles.length <= 256);
+  assert.ok(Array.isArray(config.rewrites));
+});
+
