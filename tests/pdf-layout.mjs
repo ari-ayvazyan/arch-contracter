@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { createServer } from '../server.mjs';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+let playwright;
+for (const candidate of [
+  process.env.PLAYWRIGHT_MODULE,
+  'playwright',
+  new URL('../../refract-text/node_modules/playwright/index.mjs', import.meta.url).href,
+  new URL('../../workshoptest/node_modules/playwright/index.mjs', import.meta.url).href,
+].filter(Boolean)) {
+  try { playwright = await import(candidate); break; } catch {}
+}
+if (!playwright) throw new Error('Playwright could not be loaded. Please install playwright or set PLAYWRIGHT_MODULE.');
+const { chromium } = playwright;
 const server = createServer();
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+const page = await browser.newPage({ viewport: { width: 1280, height: 1250 } });
 const errors = []; page.on('pageerror', error => errors.push(error.message));
 await mkdir('test-results/pdf', { recursive: true });
 try {

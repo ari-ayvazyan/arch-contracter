@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:pdf": "node tests/pdf-layout.mjs",
     "check": "node --check server.mjs && node --check dist/app.js && node --check dist/model.js && node --check dist/pagination.js"
   },
   "engines": { "node": ">=20" }

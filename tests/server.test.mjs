@@ -14,7 +14,7 @@ test('Lokale API: Speichern, Backup, Konflikte und fremde Ursprünge', async () 
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     assert.equal((await fetch(base)).status, 200);
-    for (const asset of ['/app.js', '/model.js', '/styles.css', '/print.css']) assert.equal((await fetch(`${base}${asset}`)).status, 200);
+    for (const asset of ['/app.js', '/model.js', '/pagination.js', '/styles.css', '/print.css']) assert.equal((await fetch(`${base}${asset}`)).status, 200);
     assert.equal((await fetch(`${base}/data/lastenheft.json`)).status, 404);
     const loaded = await (await fetch(`${base}/api/document`)).json();
     loaded.data.document.customer = 'Neuer Testkunde';

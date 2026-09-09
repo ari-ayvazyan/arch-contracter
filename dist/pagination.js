@@ -2,6 +2,7 @@
 export function paginateDocument(html, destination) {
   const template = document.createElement('template'); template.innerHTML = html;
   const source = template.content.querySelector('.document');
+  if (!source) throw new Error('Ungültiges Dokument-HTML.');
   const footerText = source.querySelector('.doc-footer')?.textContent || '';
   const stage = document.createElement('div'); stage.className = 'pdf-stage';
   document.body.append(stage);
