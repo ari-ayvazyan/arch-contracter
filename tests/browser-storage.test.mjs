@@ -90,3 +90,78 @@ test('Browser-Speicher, Download und Upload im gehosteten Betrieb', { skip: !pla
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test('Einzelnes Lastenheft im Browser-Speicher, Neues Projekt und Unlöschbarkeit des Lastenhefts', { skip: !playwright }, async () => {
+  const { chromium } = playwright;
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+
+  try {
+    // 1. Initiales Laden: Ein einzelnes Dokument liegt im Browser-Speicher
+    await page.goto(base);
+    await page.waitForSelector('#nodes .node');
+
+    const storedRaw = await page.evaluate(() => localStorage.getItem(`arch-contracter-data:${location.port}`));
+    assert.ok(storedRaw, 'Dokument muss in localStorage vorliegen');
+    const stored = JSON.parse(storedRaw);
+    assert.equal(stored.document.title, 'Kundenportal');
+
+    // 2. Keine Mehrfachdokument-Umschalter oder Listen vorhanden
+    assert.equal(await page.locator('#doc-switcher').count(), 0, 'Kein Dokumenten-Switcher');
+    assert.equal(await page.locator('#document-list').count(), 0, 'Keine Dokumenten-Liste in der Sidebar');
+    assert.equal(await page.locator('#delete-current-doc').count(), 0, 'Kein Lastenheft-Löschen-Button im Header');
+
+    // 3. Kunde, Version und Datum existieren nicht im Inspector des Wurzelelements
+    await page.locator('#nodes .node.root').click();
+    assert.equal(await page.locator('.inspector [data-field="doc.customer"]').count(), 0);
+    assert.equal(await page.locator('.inspector [data-field="doc.version"]').count(), 0);
+    assert.equal(await page.locator('.inspector [data-field="doc.date"]').count(), 0);
+
+    // 4. Das Lastenheft selbst (Wurzelelement) kann nicht gelöscht werden
+    assert.equal(await page.locator('.inspector [data-action="delete"]').count(), 0, 'Wurzelelement hat keinen Löschen-Button im Inspector');
+    assert.equal(await page.locator('.inspector [data-action="delete-doc"]').count(), 0);
+
+    // Nicht-Wurzel-Elemente können hingegen gelöscht werden
+    await page.locator('#nodes .node[data-node="zusatzmodule"]').click();
+    assert.equal(await page.locator('.inspector [data-action="delete"]').count(), 1, 'Unterelement hat Löschen-Button');
+
+    // 5. Testen: '+ Neues Projekt' Button unter 'Auf Vorlage zurücksetzen'
+    const newProjectBtn = page.locator('#new-project');
+    assert.ok(await newProjectBtn.isVisible(), '+ Neues Projekt Button muss sichtbar sein');
+    await newProjectBtn.click();
+    await page.waitForSelector('#new-doc-dialog[open]');
+
+    // Sicherstellen, dass keine Duplizieren- oder Kunden-Felder vorhanden sind
+    assert.equal(await page.locator('#new-doc-customer').count(), 0);
+    assert.equal(await page.locator('input[name="doc-template"][value="duplicate"]').count(), 0);
+
+    // Neues Projekt anlegen
+    await page.locator('#new-doc-title').fill('CRM Einführung 2026');
+    await page.locator('#new-doc-form button[type="submit"]').click();
+
+    await page.waitForFunction(() => document.querySelector('#document-title')?.textContent === 'CRM Einführung 2026');
+
+    // localStorage prüfen: Das neue Projekt ersetzt den aktuellen Stand
+    const updatedRaw = await page.evaluate(() => localStorage.getItem(`arch-contracter-data:${location.port}`));
+    const updated = JSON.parse(updatedRaw);
+    assert.equal(updated.document.title, 'CRM Einführung 2026');
+
+    // 6. Auf Standard-Vorlage zurücksetzen
+    page.once('dialog', async dialog => {
+      await dialog.accept();
+    });
+    await page.locator('#reset-default').click();
+    await page.waitForFunction(() => document.querySelector('#document-title')?.textContent === 'Kundenportal');
+
+    const resetRaw = await page.evaluate(() => localStorage.getItem(`arch-contracter-data:${location.port}`));
+    const resetData = JSON.parse(resetRaw);
+    assert.equal(resetData.document.title, 'Kundenportal');
+  } finally {
+    await browser.close();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+

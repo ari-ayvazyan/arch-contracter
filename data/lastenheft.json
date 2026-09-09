@@ -2,10 +2,7 @@
   "$schema": "../lastenheft.schema.json",
   "schemaVersion": 1,
   "document": {
-    "title": "Kundenportal",
-    "customer": "Musterkunde · bitte ersetzen",
-    "version": "0.1 – Entwurf",
-    "date": "2026-09-09"
+    "title": "Kundenportal"
   },
   "nodes": [
     {
@@ -16,7 +13,7 @@
       "description": "Das Kundenportal bündelt den geschützten Zugang zu Dokumenten und Informationen. Dieses Beispieldokument dient als Ausgangspunkt für die gemeinsame Abstimmung des Leistungsumfangs.",
       "criteria": [],
       "exclusions": "Laufender Betrieb und Support sind nicht Teil dieses Leistungsumfangs und werden gesondert vereinbart.",
-      "notes": "Beispieldaten: Titel, Kunde und Inhalte vor dem Versand anpassen.",
+      "notes": "Beispieldaten: Titel und Inhalte vor dem Versand anpassen.",
       "effort": null,
       "contract": "",
       "questions": []

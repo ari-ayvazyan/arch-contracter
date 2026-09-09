@@ -3,10 +3,7 @@ export const defaultTemplate = {
   $schema: "../lastenheft.schema.json",
   schemaVersion: 1,
   document: {
-    title: "Kundenportal",
-    customer: "Musterkunde · bitte ersetzen",
-    version: "0.1 – Entwurf",
-    date: "2026-09-09"
+    title: "Kundenportal"
   },
   nodes: [
     {
@@ -17,7 +14,7 @@ export const defaultTemplate = {
       description: "Das Kundenportal bündelt den geschützten Zugang zu Dokumenten und Informationen. Dieses Beispieldokument dient als Ausgangspunkt für die gemeinsame Abstimmung des Leistungsumfangs.",
       criteria: [],
       exclusions: "Laufender Betrieb und Support sind nicht Teil dieses Leistungsumfangs und werden gesondert vereinbart.",
-      notes: "Beispieldaten: Titel, Kunde und Inhalte vor dem Versand anpassen.",
+      notes: "Beispieldaten: Titel und Inhalte vor dem Versand anpassen.",
       effort: null,
       contract: "",
       questions: []
@@ -197,7 +194,9 @@ export function validate(data) {
   const fail = message => { throw new Error(message); };
   if (!data || data.schemaVersion !== 1) fail('schemaVersion muss 1 sein.');
   if (!data.document || typeof data.document.title !== 'string' || !data.document.title.trim()) fail('Dokumenttitel fehlt.');
-  for (const key of ['customer', 'version', 'date']) if (typeof data.document[key] !== 'string') fail(`document.${key} muss Text sein.`);
+  for (const key of ['customer', 'version', 'date']) {
+    if (data.document[key] !== undefined && typeof data.document[key] !== 'string') fail(`document.${key} muss Text sein.`);
+  }
   if (!Array.isArray(data.nodes) || !data.nodes.length || data.nodes.length > 2000) fail('Es müssen 1 bis 2000 Elemente vorhanden sein.');
   if (!Array.isArray(data.links)) fail('links muss eine Liste sein.');
   const ids = new Set();
@@ -289,5 +288,5 @@ export function documentHtml(data, contract = '*', includeQuestions = true) {
   }
   walk(root.id);
   const questions = data.nodes.filter(n => included.has(n.id) || (contract === '*' && n.id === root.id)).flatMap(n => n.questions.filter(q => q.visibility !== 'internal' && q.status === 'open').map(q => `<li><strong>${e(n.title)}</strong><p>${e(q.text)}</p>${q.answer ? `<p>Zwischenstand: ${e(q.answer)}</p>` : ''}</li>`));
-  return `<article class="document"><header class="doc-cover"><div class="doc-eyebrow">LEISTUNGSBESCHREIBUNG</div><h1>${e(data.document.title)}</h1><p class="doc-subtitle">Lastenheft${contract === '*' ? '' : ` · ${e(contract)}`}</p><dl><div><dt>Kunde</dt><dd>${e(data.document.customer || 'Noch nicht angegeben')}</dd></div><div><dt>Version</dt><dd>${e(data.document.version)}</dd></div><div><dt>Stand</dt><dd>${e(data.document.date)}</dd></div></dl>${root.description ? `<p class="preserve">${e(root.description)}</p>` : ''}${root.criteria.length ? `<h3>Übergreifende Abnahmekriterien</h3><ul>${root.criteria.map(c => `<li>${e(c)}</li>`).join('')}</ul>` : ''}${root.exclusions ? `<h3>Übergreifende Abgrenzung</h3><p class="preserve">${e(root.exclusions)}</p>` : ''}</header>${warnings.length ? `<aside class="doc-warning"><h3>Voraussetzungen außerhalb dieses Vertragsumfangs</h3><ul>${warnings.map(l => `<li>${e(byId(l.source).title)} benötigt ${e(byId(l.target).title)} (${e(effectiveContract(data, l.target))}).</li>`).join('')}</ul></aside>` : ''}<nav class="doc-toc"><h2>Inhalt</h2><ol>${toc.join('')}</ol></nav>${sections.join('')}${includeQuestions && questions.length ? `<section class="doc-section"><h2>Noch zu klären</h2><ol>${questions.join('')}</ol></section>` : ''}<footer class="doc-footer">${e(data.document.title)} · Version ${e(data.document.version)} · ${e(data.document.date)}</footer></article>`;
+  return `<article class="document"><header class="doc-cover"><div class="doc-eyebrow">LEISTUNGSBESCHREIBUNG</div><h1>${e(data.document.title)}</h1><p class="doc-subtitle">Lastenheft${contract === '*' ? '' : ` · ${e(contract)}`}</p>${root.description ? `<p class="preserve">${e(root.description)}</p>` : ''}${root.criteria.length ? `<h3>Übergreifende Abnahmekriterien</h3><ul>${root.criteria.map(c => `<li>${e(c)}</li>`).join('')}</ul>` : ''}${root.exclusions ? `<h3>Übergreifende Abgrenzung</h3><p class="preserve">${e(root.exclusions)}</p>` : ''}</header>${warnings.length ? `<aside class="doc-warning"><h3>Voraussetzungen außerhalb dieses Vertragsumfangs</h3><ul>${warnings.map(l => `<li>${e(byId(l.source).title)} benötigt ${e(byId(l.target).title)} (${e(effectiveContract(data, l.target))}).</li>`).join('')}</ul></aside>` : ''}<nav class="doc-toc"><h2>Inhalt</h2><ol>${toc.join('')}</ol></nav>${sections.join('')}${includeQuestions && questions.length ? `<section class="doc-section"><h2>Noch zu klären</h2><ol>${questions.join('')}</ol></section>` : ''}<footer class="doc-footer">${e(data.document.title)}</footer></article>`;
 }

@@ -21,7 +21,15 @@ let toastTimer;
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').hidden = true, 4500); }
 function notice(message) { $('#notice').hidden = !message; $('#notice').innerHTML = message ? `<span>${e(message)}</span><button data-action="reload">Stand laden</button><button data-action="download">JSON herunterladen</button>` : ''; }
 function backup() { try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { toast('Lokale Wiederherstellung nicht verfügbar. Bitte speichern.'); } }
-function updateSaveStatus() { $('#save-status').textContent = saving ? 'Speichert …' : conflict ? 'Konflikt' : dirty ? 'Ungespeichert' : '✓ Gespeichert'; $('#save-status').classList.toggle('dirty', dirty || conflict); $('#save').disabled = saving || !data; }
+function updateSaveStatus() {
+  $('#save-status').textContent = !data ? 'Kein Dokument' : saving ? 'Speichert …' : conflict ? 'Konflikt' : dirty ? 'Ungespeichert' : '✓ Gespeichert';
+  $('#save-status').classList.toggle('dirty', dirty || conflict);
+  $('#save').disabled = saving || !data;
+  const editBtn = $('#document-edit');
+  if (editBtn) editBtn.disabled = !data;
+  const previewBtn = $('#preview');
+  if (previewBtn) previewBtn.disabled = !data;
+}
 function checkpoint() { undo.push(clone(data)); if (undo.length > 80) undo.shift(); redo = []; }
 function changed() { dirty = true; backup(); updateSaveStatus(); renderOverview(); }
 function mutate(fn, inspect = true) {
@@ -43,6 +51,7 @@ async function load(force = false) {
         loadedData = null;
       }
     }
+
     if (!loadedData) {
       try {
         const response = await fetch('/api/document');
@@ -53,25 +62,28 @@ async function load(force = false) {
         }
       } catch {}
     }
+
     if (!loadedData) {
       loadedData = clone(defaultTemplate);
       validate(loadedData);
     }
+
     data = loadedData;
     try {
-      if (!raw) localStorage.setItem(storageKey, JSON.stringify(data));
+      localStorage.setItem(storageKey, JSON.stringify(data));
       localStorage.removeItem(draftKey);
     } catch {}
+
     dirty = false;
     conflict = false;
     undo = [];
     redo = [];
-    if (!selected || !node(selected)) selected = root().id;
+    selected = data ? root().id : null;
     notice('');
     updateSaveStatus();
     renderOverview();
     renderInspector();
-    fit();
+    if (data) fit();
   } catch (error) {
     notice(`Daten konnten nicht geladen werden: ${error.message}`);
   }
@@ -81,7 +93,8 @@ async function save() {
   try { validate(data); } catch (error) { return toast(error.message); }
   saving = true; updateSaveStatus();
   try {
-    localStorage.setItem(storageKey, JSON.stringify(data));
+    const raw = JSON.stringify(data);
+    localStorage.setItem(storageKey, raw);
     try { localStorage.removeItem(draftKey); } catch {}
     dirty = false;
     conflict = false;
@@ -121,7 +134,8 @@ async function uploadFile(file) {
     if (dirty && !confirm('Ungespeicherte Änderungen werden überschrieben. Fortfahren?')) return;
     data = imported;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(data));
+      const raw = JSON.stringify(data);
+      localStorage.setItem(storageKey, raw);
       localStorage.removeItem(draftKey);
     } catch {}
     dirty = false;
@@ -157,7 +171,8 @@ async function resetToDefault() {
     if (!defaultData) defaultData = clone(defaultTemplate);
     data = defaultData;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(data));
+      const raw = JSON.stringify(data);
+      localStorage.setItem(storageKey, raw);
       localStorage.removeItem(draftKey);
     } catch {}
     dirty = false;
@@ -175,6 +190,86 @@ async function resetToDefault() {
     toast(`Zurücksetzen fehlgeschlagen: ${error.message}`);
   }
 }
+function openCreateDocumentDialog(preferredTemplate = 'template') {
+  const titleInput = $('#new-doc-title');
+  if (titleInput) titleInput.value = '';
+  const radio = document.querySelector(`input[name="doc-template"][value="${preferredTemplate}"]`);
+  if (radio) radio.checked = true;
+  $('#new-doc-dialog').showModal();
+  setTimeout(() => titleInput?.focus(), 50);
+}
+async function createDocument({ title, templateType }) {
+  if (dirty && !confirm('Ungespeicherte Änderungen im aktuellen Lastenheft verwerfen?')) {
+    return false;
+  }
+
+  const docTitle = title.trim() || 'Neues Lastenheft';
+
+  let newDoc;
+  if (templateType === 'blank') {
+    const rootId = `root_${crypto.randomUUID().slice(0, 8)}`;
+    newDoc = {
+      $schema: '../lastenheft.schema.json',
+      schemaVersion: 1,
+      document: {
+        title: docTitle
+      },
+      nodes: [
+        {
+          id: rootId,
+          parentId: null,
+          type: 'document',
+          title: docTitle,
+          description: '',
+          criteria: [],
+          exclusions: '',
+          notes: '',
+          effort: null,
+          contract: '',
+          questions: []
+        }
+      ],
+      links: []
+    };
+  } else {
+    newDoc = clone(defaultTemplate);
+    newDoc.document.title = docTitle;
+    delete newDoc.document.customer;
+    delete newDoc.document.version;
+    delete newDoc.document.date;
+    const r = newDoc.nodes.find(n => n.parentId === null);
+    if (r) r.title = docTitle;
+  }
+
+  validate(newDoc);
+
+  data = newDoc;
+  const raw = JSON.stringify(data);
+  try {
+    localStorage.setItem(storageKey, raw);
+    localStorage.removeItem(draftKey);
+  } catch {}
+
+  dirty = false;
+  conflict = false;
+  undo = [];
+  redo = [];
+  scope = '*';
+  search = '';
+  const searchInput = $('#search');
+  if (searchInput) searchInput.value = '';
+  selected = root().id;
+  nodeOffsets.clear();
+
+  notice('');
+  updateSaveStatus();
+  renderOverview();
+  renderInspector();
+  fit();
+  toast(`„${docTitle}“ erfolgreich erstellt.`);
+  return true;
+}
+
 function select(id, center = false) { selected = id; if (center) { let current = node(id); while (current) { collapsed.delete(current.id); current = node(current.parentId); } } renderOverview(); renderInspector(); if (center && positions.has(id)) { const p = positions.get(id); pan = { x: $('#canvas').clientWidth / 2 - (p.x + 113) * zoom, y: $('#canvas').clientHeight / 2 - (p.y + 45) * zoom }; transform(); } }
 function setView(next) { cancelDependency(); view = next; renderOverview(); }
 function activeNodes() {
@@ -184,7 +279,34 @@ function activeNodes() {
   return { matching, visible };
 }
 function renderOverview() {
-  if (!data) return;
+  if (!data) {
+    $('#document-title').textContent = 'Kein Lastenheft';
+    document.title = 'Arch-Contracter';
+    $('#node-count').textContent = '0';
+    $('#question-count').textContent = '0';
+    $('#scope-label').textContent = 'KEIN LASTENHEFT';
+    $('#contracts').innerHTML = '';
+    $('#mobile-scope').innerHTML = '<option value="*">Keine Vertragsumfänge</option>';
+    $('#undo').disabled = true;
+    $('#redo').disabled = true;
+    $('#canvas').hidden = false;
+    $('#list-view').hidden = true;
+    $('#relationship-bar').hidden = true;
+    $('.zoom-controls').hidden = true;
+    $('#edges').innerHTML = '';
+    $('#empty').hidden = true;
+    $('#canvas-hint').textContent = 'Erstelle ein neues Lastenheft mit dem Button in der Mitte oder in der Menüleiste.';
+    $('#nodes').innerHTML = `
+      <div class="empty-docs-view">
+        <button id="empty-create-btn" class="empty-plus-button" title="Neues Lastenheft erstellen" aria-label="Neues Lastenheft erstellen">
+          <span class="empty-plus-icon">+</span>
+        </button>
+        <p class="empty-docs-title">Kein Lastenheft vorhanden</p>
+        <p class="empty-docs-text">Klicke auf das <strong>+</strong>, um ein neues Lastenheft anzulegen.</p>
+      </div>
+    `;
+    return;
+  }
   $('#document-title').textContent = data.document.title; document.title = `${data.document.title} · Arch-Contracter`;
   $('#node-count').textContent = data.nodes.length - 1;
   $('#question-count').textContent = data.nodes.reduce((sum, n) => sum + n.questions.filter(q => q.status === 'open').length, 0);
@@ -332,9 +454,13 @@ $('#inspector').addEventListener('paste', event => {
   current.append(document.createTextNode(rest)); syncCriteria(); focusCriterion(current);
 });
 function renderInspector() {
+  if (!data) {
+    $('#inspector').innerHTML = '<p class="inspector-empty">Kein Lastenheft ausgewählt.<br><br>Erstelle ein neues Lastenheft über „+ Neues Projekt“.</p>';
+    return;
+  }
   const n = selectedNode(); if (!n) { $('#inspector').innerHTML = '<p class="inspector-empty">Wähle ein Element im Baum aus.</p>'; return; }
   const isRoot = n.parentId === null;
-  $('#inspector').innerHTML = `<div class="inspector-heading"><span class="type-chip">${e(types[n.type])}</span><button class="icon-button" data-action="close-inspector" title="Auswahl schließen">×</button></div><input class="title-input" data-field="title" aria-label="Titel" value="${e(n.title)}"><div class="element-id">${e(n.id)}</div>${isRoot ? field('Kunde', 'doc.customer', data.document.customer) + field('Dokumentversion', 'doc.version', data.document.version) + `<label class="field"><span>Dokumentdatum</span><input type="date" data-field="doc.date" value="${e(data.document.date)}"></label>` : `<label class="field"><span>Aufwandsschätzung</span><div class="effort">${[1, 2, 3, 4].map(v => `<button data-effort="${v}" class="${n.effort === v ? 'active' : ''}" title="${v}: ${['', 'gering', 'mittel', 'erhöht', 'hoch'][v]} · erneut klicken zum Entfernen">${v}</button>`).join('')}</div><small>1 = gering · 4 = hoch · nur intern</small></label>`}${field('Beschreibung', 'description', n.description, true)}${criteriaEditor(n)}${field('Nicht im Leistungsumfang', 'exclusions', n.exclusions, true)}<label class="field"><span>Vertragsumfang</span><input data-field="contract" list="contract-names" value="${e(n.contract)}" placeholder="Vom übergeordneten Element erben"><datalist id="contract-names">${contracts().map(c => `<option value="${e(c)}"></option>`).join('')}</datalist><small>Aktuell: ${e(effectiveContract(data, n.id))}. Ein eigener Name isoliert diesen Teilbaum; Unterelemente erben ihn.</small></label><div class="inspector-section"><div class="section-header"><span class="section-title">Offene Fragen <span class="question-badge">${n.questions.filter(q => q.status === 'open').length}</span></span><button class="text-button" data-action="add-question">+ Frage</button></div>${n.questions.map(q => `<div class="question-card ${q.status === 'resolved' ? 'resolved' : ''}"><textarea aria-label="Frage" data-question="${e(q.id)}" data-qfield="text">${e(q.text)}</textarea><textarea class="answer" aria-label="Antwort" placeholder="Antwort oder Zwischenstand …" data-question="${e(q.id)}" data-qfield="answer">${e(q.answer)}</textarea><div class="question-controls"><select aria-label="Status der Frage" data-question="${e(q.id)}" data-qfield="status"><option value="open" ${q.status === 'open' ? 'selected' : ''}>Offen</option><option value="resolved" ${q.status === 'resolved' ? 'selected' : ''}>Geklärt</option></select><button data-delete-question="${e(q.id)}" title="Frage löschen">×</button></div></div>`).join('') || '<p class="element-id">Noch keine Fragen erfasst.</p>'}</div><div class="inspector-section">${field('Interne Notizen <span class="internal-label">Nicht im PDF</span>', 'notes', n.notes, true)}</div><div class="inspector-section"><div class="section-header"><span class="section-title">Referenzen & Abhängigkeiten</span></div>${data.links.filter(l => l.source === n.id || l.target === n.id).map(l => { const outgoing = l.source === n.id, other = node(outgoing ? l.target : l.source); return `<div class="reference-row"><button data-select="${e(other.id)}"><small>${l.type === 'reference' ? 'Siehe auch' : outgoing ? 'Benötigt' : 'Wird benötigt von'}</small>${e(other.title)} ↗</button><button data-delete-link="${e(l.id)}" title="Verbindung entfernen">×</button></div>`; }).join('')}<div class="link-form"><select id="link-type" aria-label="Art der Verbindung"><option value="requires">Benötigt</option><option value="reference">Siehe auch</option></select><select id="link-target" aria-label="Verknüpftes Element"><option value="">Element auswählen …</option>${data.nodes.filter(other => other.id !== n.id).map(other => `<option value="${e(other.id)}">${e(other.title)}</option>`).join('')}</select><button data-action="add-link">+ Verbindung anlegen</button></div></div><div class="element-actions">${n.type !== 'requirement' ? '<button data-action="add-child">+ Unterelement</button>' : ''}${!isRoot ? '<button data-action="duplicate">Duplizieren</button><button data-action="up" title="Nach oben verschieben">↑</button><button data-action="down" title="Nach unten verschieben">↓</button><button class="danger" data-action="delete">Löschen</button>' : ''}<button data-action="export-node">Umfang als PDF ↗</button></div>${!isRoot ? `<label class="field" style="margin-top:18px"><span>Übergeordnetes Element</span><select data-field="parentId">${data.nodes.filter(p => p.type !== 'requirement' && !descendants(data, n.id).has(p.id)).map(p => `<option value="${e(p.id)}" ${p.id === n.parentId ? 'selected' : ''}>${e(p.title)}</option>`).join('')}</select></label>` : ''}`;
+  $('#inspector').innerHTML = `<div class="inspector-heading"><span class="type-chip">${e(types[n.type])}</span><button class="icon-button" data-action="close-inspector" title="Auswahl schließen">×</button></div><input class="title-input" data-field="title" aria-label="Titel" value="${e(n.title)}"><div class="element-id">${e(n.id)}</div>${isRoot ? '' : `<label class="field"><span>Aufwandsschätzung</span><div class="effort">${[1, 2, 3, 4].map(v => `<button data-effort="${v}" class="${n.effort === v ? 'active' : ''}" title="${v}: ${['', 'gering', 'mittel', 'erhöht', 'hoch'][v]} · erneut klicken zum Entfernen">${v}</button>`).join('')}</div><small>1 = gering · 4 = hoch · nur intern</small></label>`}${field('Beschreibung', 'description', n.description, true)}${criteriaEditor(n)}${field('Nicht im Leistungsumfang', 'exclusions', n.exclusions, true)}<label class="field"><span>Vertragsumfang</span><input data-field="contract" list="contract-names" value="${e(n.contract)}" placeholder="Vom übergeordneten Element erben"><datalist id="contract-names">${contracts().map(c => `<option value="${e(c)}"></option>`).join('')}</datalist><small>Aktuell: ${e(effectiveContract(data, n.id))}. Ein eigener Name isoliert diesen Teilbaum; Unterelemente erben ihn.</small></label><div class="inspector-section"><div class="section-header"><span class="section-title">Offene Fragen <span class="question-badge">${n.questions.filter(q => q.status === 'open').length}</span></span><button class="text-button" data-action="add-question">+ Frage</button></div>${n.questions.map(q => `<div class="question-card ${q.status === 'resolved' ? 'resolved' : ''}"><textarea aria-label="Frage" data-question="${e(q.id)}" data-qfield="text">${e(q.text)}</textarea><textarea class="answer" aria-label="Antwort" placeholder="Antwort oder Zwischenstand …" data-question="${e(q.id)}" data-qfield="answer">${e(q.answer)}</textarea><div class="question-controls"><select aria-label="Status der Frage" data-question="${e(q.id)}" data-qfield="status"><option value="open" ${q.status === 'open' ? 'selected' : ''}>Offen</option><option value="resolved" ${q.status === 'resolved' ? 'selected' : ''}>Geklärt</option></select><button data-delete-question="${e(q.id)}" title="Frage löschen">×</button></div></div>`).join('') || '<p class="element-id">Noch keine Fragen erfasst.</p>'}</div><div class="inspector-section">${field('Interne Notizen <span class="internal-label">Nicht im PDF</span>', 'notes', n.notes, true)}</div><div class="inspector-section"><div class="section-header"><span class="section-title">Referenzen & Abhängigkeiten</span></div>${data.links.filter(l => l.source === n.id || l.target === n.id).map(l => { const outgoing = l.source === n.id, other = node(outgoing ? l.target : l.source); return `<div class="reference-row"><button data-select="${e(other.id)}"><small>${l.type === 'reference' ? 'Siehe auch' : outgoing ? 'Benötigt' : 'Wird benötigt von'}</small>${e(other.title)} ↗</button><button data-delete-link="${e(l.id)}" title="Verbindung entfernen">×</button></div>`; }).join('')}<div class="link-form"><select id="link-type" aria-label="Art der Verbindung"><option value="requires">Benötigt</option><option value="reference">Siehe auch</option></select><select id="link-target" aria-label="Verknüpftes Element"><option value="">Element auswählen …</option>${data.nodes.filter(other => other.id !== n.id).map(other => `<option value="${e(other.id)}">${e(other.title)}</option>`).join('')}</select><button data-action="add-link">+ Verbindung anlegen</button></div></div><div class="element-actions">${n.type !== 'requirement' ? '<button data-action="add-child">+ Unterelement</button>' : ''}${!isRoot ? '<button data-action="duplicate">Duplizieren</button><button data-action="up" title="Nach oben verschieben">↑</button><button data-action="down" title="Nach unten verschieben">↓</button><button class="danger" data-action="delete">Löschen</button>' : ''}<button data-action="export-node">${isRoot ? 'Lastenheft als PDF ↗' : 'Umfang als PDF ↗'}</button></div>${!isRoot ? `<label class="field" style="margin-top:18px"><span>Übergeordnetes Element</span><select data-field="parentId">${data.nodes.filter(p => p.type !== 'requirement' && !descendants(data, n.id).has(p.id)).map(p => `<option value="${e(p.id)}" ${p.id === n.parentId ? 'selected' : ''}>${e(p.title)}</option>`).join('')}</select></label>` : ''}`;
 }
 let addChoices = null;
 function closeAddChoices(restoreFocus = false) {
@@ -394,6 +520,7 @@ function editNodeTitle(key, animate = false) {
   const finish = cancel => {
     if (finished) return; finished = true;
     n.title = cancel ? original : input.value.trim() || original;
+    if (n.parentId === null) data.document.title = n.title;
     backup();
     const label = document.createElement('span'); label.className = 'node-title'; label.textContent = n.title;
     input.replaceWith(label); card.draggable = n.parentId !== null;
@@ -403,6 +530,7 @@ function editNodeTitle(key, animate = false) {
   input.addEventListener('input', () => {
     if (!recorded) { checkpoint(); recorded = true; }
     n.title = input.value.trim() || original;
+    if (n.parentId === null) data.document.title = n.title;
     dirty = true; backup(); updateSaveStatus();
   });
   input.addEventListener('keydown', event => {
@@ -417,7 +545,7 @@ function openNodeOptions(key, anchor) {
   closeAddChoices(); if (wasOpen) return;
   const menu = document.createElement('div'); menu.className = 'add-choices node-options';
   menu.setAttribute('role', 'group'); menu.setAttribute('aria-label', `Optionen für ${n.title}`);
-  menu.innerHTML = `${n.parentId !== null ? '<button data-node-action="duplicate">Duplizieren</button>' : ''}<button data-node-action="export-node">Umfang als PDF ↗</button>${n.parentId !== null ? '<button class="danger" data-node-action="delete">Löschen</button>' : ''}`;
+  menu.innerHTML = `${n.parentId !== null ? '<button data-node-action="duplicate">Duplizieren</button>' : ''}<button data-node-action="export-node">${n.parentId !== null ? 'Umfang als PDF ↗' : 'Lastenheft als PDF ↗'}</button>${n.parentId !== null ? '<button class="danger" data-node-action="delete">Löschen</button>' : ''}`;
   document.body.append(menu); addChoices = { menu, anchor }; anchor.setAttribute('aria-expanded', 'true');
   const rect = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(rect.right + 8, innerWidth - menu.offsetWidth - 8))}px`;
@@ -554,6 +682,8 @@ function renderExport() {
   }
 }
 document.addEventListener('click', event => {
+  const emptyCreateBtn = event.target.closest('#empty-create-btn');
+  if (emptyCreateBtn) return openCreateDocumentDialog();
   const b = event.target.closest('button'); if (!b || !data) return;
   if (b.dataset.view) return setView(b.dataset.view);
   if (b.dataset.scope) { scope = b.dataset.scope; renderOverview(); fit(); return; }
@@ -572,8 +702,8 @@ document.addEventListener('click', event => {
   if (action === 'add-question') { mutate(() => selectedNode().questions.push({ id: id('q'), text: 'Neue Frage', answer: '', status: 'open' })); const inputs = $('#inspector').querySelectorAll('[data-qfield="text"]'); inputs[inputs.length - 1]?.focus(); inputs[inputs.length - 1]?.select(); return; }
   if (action === 'add-link') { const target = $('#link-target').value, type = $('#link-type').value; if (!target) return toast('Bitte ein Element auswählen.'); if (data.links.some(l => l.source === selected && l.target === target && l.type === type)) return toast('Diese Verbindung ist bereits vorhanden.'); return mutate(() => data.links.push({ id: id('link'), source: selected, target, type })); }
   if (action === 'up' || action === 'down') return reorder(action === 'up' ? -1 : 1);
-  if (action === 'delete') { const n = selectedNode(), count = descendants(data, n.id).size; if (confirm(`„${n.title}“${count > 1 ? ` mit ${count - 1} Unterelementen` : ''} löschen? Zugehörige Verbindungen werden ebenfalls entfernt.`)) mutate(() => { removeNode(data, n.id); selected = n.parentId; }); return; }
-  if (action === 'duplicate') return mutate(() => { const n = selectedNode(), ids = descendants(data, n.id), mapping = new Map([...ids].map(key => [key, id(node(key).type)])); const copies = data.nodes.filter(item => ids.has(item.id)).map(item => ({ ...clone(item), id: mapping.get(item.id), parentId: item.id === n.id ? n.parentId : mapping.get(item.parentId), title: item.id === n.id ? `${item.title} (Kopie)` : item.title, questions: item.questions.map(q => ({ ...q, id: id('q') })) })); const links = data.links.filter(l => ids.has(l.source)).map(l => ({ ...l, id: id('link'), source: mapping.get(l.source), target: mapping.get(l.target) || l.target })); data.nodes.push(...copies); data.links.push(...links); selected = mapping.get(n.id); });
+  if (action === 'delete') { const n = selectedNode(); if (n.parentId === null) return toast('Das Lastenheft kann nicht gelöscht werden.'); const count = descendants(data, n.id).size; if (confirm(`„${n.title}“${count > 1 ? ` mit ${count - 1} Unterelementen` : ''} löschen? Zugehörige Verbindungen werden ebenfalls entfernt.`)) mutate(() => { removeNode(data, n.id); selected = n.parentId; }); return; }
+  if (action === 'duplicate') return mutate(() => { const n = selectedNode(); if (n.parentId === null) return; const ids = descendants(data, n.id), mapping = new Map([...ids].map(key => [key, id(node(key).type)])); const copies = data.nodes.filter(item => ids.has(item.id)).map(item => ({ ...clone(item), id: mapping.get(item.id), parentId: item.id === n.id ? n.parentId : mapping.get(item.parentId), title: item.id === n.id ? `${item.title} (Kopie)` : item.title, questions: item.questions.map(q => ({ ...q, id: id('q') })) })); const links = data.links.filter(l => ids.has(l.source)).map(l => ({ ...l, id: id('link'), source: mapping.get(l.source), target: mapping.get(l.target) || l.target })); data.nodes.push(...copies); data.links.push(...links); selected = mapping.get(n.id); });
   if (action === 'export-node') return openExport(effectiveContract(data, selected));
 });
 $('#inspector').addEventListener('focusin', event => { if (event.target.matches('[data-field],[data-question]')) event.target.dataset.original = event.target.value; });
@@ -605,11 +735,11 @@ $('#nodes').addEventListener('drop', event => { event.preventDefault(); const ta
 $('#nodes').addEventListener('dragend', () => { dragged = null; document.querySelectorAll('.drag-over,.drop-before,.drop-after').forEach(clearDrop); });
 let pointer;
 $('#canvas').addEventListener('pointerdown', event => {
-  if (event.button !== 0) return;
+  if (event.button !== 0 || event.target.closest('button,input,[contenteditable]')) return;
   if (dependencyDraft) { event.preventDefault(); return; }
   const card = event.target.closest('[data-node]');
   if (card) {
-    if (event.altKey || event.target.closest('button,input,[contenteditable]')) return;
+    if (event.altKey) return;
     event.preventDefault();
     const key = card.dataset.node;
     nodeDrag = { key, pointerId: event.pointerId, x: event.clientX, y: event.clientY, offset: { ...(nodeOffsets.get(key) || { x: 0, y: 0 }) }, moved: false };
@@ -650,9 +780,20 @@ $('#upload-input')?.addEventListener('change', event => {
   if (file) uploadFile(file);
 });
 $('#reset-default').onclick = resetToDefault;
+$('#new-project')?.addEventListener('click', () => openCreateDocumentDialog());
 $('#undo').onclick = () => history('undo'); $('#redo').onclick = () => history('redo');
-$('#document-edit').onclick = () => select(root().id, true);
-$('#preview').onclick = () => openExport(); $('#close-export').onclick = () => $('#export-dialog').close();
+$('#document-edit').onclick = () => { if (data) select(root().id, true); };
+$('#close-new-doc')?.addEventListener('click', () => $('#new-doc-dialog').close());
+$('#cancel-new-doc')?.addEventListener('click', () => $('#new-doc-dialog').close());
+$('#new-doc-dialog')?.addEventListener('click', event => { if (event.target === $('#new-doc-dialog')) $('#new-doc-dialog').close(); });
+$('#new-doc-form')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const title = $('#new-doc-title').value;
+  const templateType = document.querySelector('input[name="doc-template"]:checked')?.value || 'template';
+  const success = await createDocument({ title, templateType });
+  if (success) $('#new-doc-dialog').close();
+});
+$('#preview').onclick = () => { if (data) openExport(); }; $('#close-export').onclick = () => $('#export-dialog').close();
 $('#export-scope').onchange = renderExport; $('#export-questions').onchange = renderExport; $('#print').onclick = () => window.print();
 $('#fit').onclick = fit; $('#zoom-in').onclick = () => setZoom(zoom * 1.2); $('#zoom-out').onclick = () => setZoom(zoom / 1.2);
 $('#reset-layout').onclick = () => { nodeOffsets.clear(); renderMap(); fit(); };

@@ -50,6 +50,7 @@ test('PDF-Inhalt schließt interne Angaben aus und maskiert HTML', () => {
   n.questions.push({ id: 'intern', text: 'GEHEIME_INTERNE_FRAGE', answer: '', status: 'open', visibility: 'internal' });
   let html = documentHtml(d);
   assert.ok(!html.includes('GEHEIME_INTERNE')); assert.ok(html.includes('&lt;script&gt;')); assert.ok(!html.includes('<script>')); assert.ok(html.includes('Welche Standardrollen'));
+  assert.ok(!html.includes('<dt>Kunde</dt>')); assert.ok(!html.includes('<dt>Version</dt>')); assert.ok(!html.includes('<dt>Stand</dt>'));
   html = documentHtml(d, '*', false); assert.ok(!html.includes('Welche Standardrollen'));
   html = documentHtml(d, 'Erweiterungen'); assert.ok(!html.includes('id="doc-rollen-rechte"')); assert.ok(html.includes('Voraussetzungen außerhalb')); assert.ok(html.includes('CRM-Anbindung'));
 });
