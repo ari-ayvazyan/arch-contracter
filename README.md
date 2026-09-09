@@ -1,6 +1,7 @@
 # Arch-Contracter
 
 Lokaler Lastenheft-Editor: Paketbaum, Drag-and-drop, Vertragsumfänge, Fragen, Referenzen und PDF-Druck. Keine Cloud, keine Konten, keine Datenbank und keine externen Frontend-Abhängigkeiten.
+<img width="1916" height="950" alt="image" src="https://github.com/user-attachments/assets/192d8f15-b439-47c7-a638-1696cf5c2cb9" />
 
 ## Starten
 
