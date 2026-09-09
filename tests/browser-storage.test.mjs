@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createServer } from '../server.mjs';
 import { fixture } from './fixture.mjs';
 
@@ -15,7 +18,11 @@ for (const candidate of [
 
 test('Browser-Speicher, Download und Upload im gehosteten Betrieb', { skip: !playwright }, async () => {
   const { chromium } = playwright;
-  const server = createServer();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'arch-contracter-browser-test-'));
+  const file = path.join(directory, 'lastenheft.json');
+  await writeFile(file, JSON.stringify(fixture, null, 2), 'utf8');
+
+  const server = createServer(file);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
@@ -32,10 +39,9 @@ test('Browser-Speicher, Download und Upload im gehosteten Betrieb', { skip: !pla
     assert.equal(stored.schemaVersion, 1);
     assert.ok(stored.document.title);
 
-    // 2. Element bearbeiten und Speichern: localStorage wird aktualisiert
+    // 2. Element bearbeiten: automatische sofortige Speicherung in localStorage
     await page.locator('#nodes .node.root').click();
     await page.locator('.inspector input[data-field="title"]').fill('Gehostetes Projekt');
-    await page.locator('#save').click();
 
     await page.waitForFunction(() => document.querySelector('#save-status')?.textContent.includes('Gespeichert'));
 
@@ -88,12 +94,17 @@ test('Browser-Speicher, Download und Upload im gehosteten Betrieb', { skip: !pla
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
 test('Einzelnes Lastenheft im Browser-Speicher, Neues Projekt und Unlöschbarkeit des Lastenhefts', { skip: !playwright }, async () => {
   const { chromium } = playwright;
-  const server = createServer();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'arch-contracter-browser-test-2-'));
+  const file = path.join(directory, 'lastenheft.json');
+  await writeFile(file, JSON.stringify(fixture, null, 2), 'utf8');
+
+  const server = createServer(file);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
@@ -162,6 +173,7 @@ test('Einzelnes Lastenheft im Browser-Speicher, Neues Projekt und Unlöschbarkei
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

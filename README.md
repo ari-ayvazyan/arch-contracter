@@ -25,7 +25,7 @@ Die Oberfläche liegt in `dist/index.html`, ergänzt durch lokale CSS- und JavaS
   1. *Beispiel-Vorlage:* Startet mit einer exemplarischen Struktur aus Paketen, Anforderungen und Fragen.
   2. *Leeres Lastenheft:* Erstellt ein sauberes Lastenheft nur mit dem Wurzelelement zum freien Neuaufbau.
 - **Unlöschbarkeit des Lastenhefts:** Das Wurzelelement des Lastenhefts kann nicht gelöscht werden; der Editor arbeitet stets mit einem aktiven Projekt. Unterelemente (Gruppen, Pakete, Anforderungen) können wie gewohnt über „…“ oder den Detailbereich entfernt werden.
-- Änderungen mit „Speichern“ oder Strg+S sichern. Alle Daten werden lokal im Speicher des Browsers (`localStorage`) abgelegt. Rückgängig/Wiederholen betrifft Dokumentänderungen; innerhalb eines Textfelds gilt das native Text-Undo.
+- Änderungen werden automatisch sofort bei jeder Eingabe und Aktion gespeichert (sowohl in der verknüpften Datei als auch im Browser-Speicher). Ein manueller Speicher-Button ist nicht mehr nötig; der Status oben rechts signalisiert jederzeit den aktuellen Speicher- bzw. Synchronisationszustand. Rückgängig/Wiederholen betrifft Dokumentänderungen; innerhalb eines Textfelds gilt das native Text-Undo.
 - „JSON herunterladen“ lädt den gesamten Datenstand des Lastenhefts als formatiertes JSON auf den Rechner herunter.
 - „JSON hochladen“ oder Drag-and-drop einer `.json`-Datei in das Browserfenster lädt ein vorhandenes Lastenheft in den Editor und speichert es im Browser ab.
 - „PDF-Vorschau“ öffnet das lineare Lastenheft. Gesamtumfang oder Einzelvertrag wählen, dann „Als PDF drucken“. Im Browserdruckdialog „Als PDF speichern“ auswählen. A4 und 100 % Skalierung nutzen; optionale Browser-Kopf-/Fußzeilen ergänzen Seitenzahlen. Interne Notizen, interne Fragen und Aufwandsschätzungen werden nicht exportiert. Kunde, Versionsnummer und Dokumentdatum werden nicht im PDF ausgegeben.
@@ -33,16 +33,20 @@ Die Oberfläche liegt in `dist/index.html`, ergänzt durch lokale CSS- und JavaS
 
 ## Datenspeicherung und gehosteter Betrieb
 
-Die Anwendung wird gehostet betrieben und speichert alle Arbeitsdaten direkt im Browser (`localStorage`). Es werden keine Benutzerkonten oder Cloud-Datenbanken benötigt:
+Die Anwendung unterstützt sowohl direkte Datei-Synchronisation (über die moderne File System Access API) als auch reinen Browser-Speicher (`localStorage`). Es werden keine Benutzerkonten oder Cloud-Datenbanken benötigt:
 
-1. **Browser-Speicher:** Beim Öffnen der Anwendung wird der lokal im Browser gespeicherte Stand geladen.
-2. **JSON Upload & Download:** Über „↑ JSON hochladen“ (oder Drag-and-drop einer JSON-Datei) und „↓ JSON herunterladen“ können vollständige Lastenheft-Dateien importiert und exportiert werden.
-3. **Tab-Synchronisation:** Änderungen, die in einem anderen Tab desselben Browsers gespeichert werden, werden über Browser-Events erkannt und synchronisiert.
-4. **Wiederherstellung:** Ungespeicherte Entwürfe werden automatisch im Browser zwischengespeichert und beim erneuten Laden zur Wiederherstellung angeboten.
+1. **File System Access API (Live-Synchronisation):** Beim ersten Öffnen der Web-App kann der Nutzer direkt auswählen, ob eine bestehende lokale JSON-Datei geöffnet oder das Dokument an einem neuen Speicherort abgelegt werden soll. Die Datei wird fortlaufend im Hintergrund überwacht: Externe Änderungen (z. B. durch einen KI-Agenten oder Editor) werden sofort automatisch in die Web-App übernommen. Jede Änderung in der Web-App wird automatisch und unmittelbar in die lokale Datei zurückgeschrieben.
+2. **Browser-Speicher:** Alternativ kann jederzeit rein im Browser-Speicher gearbeitet werden (ebenfalls mit sofortiger automatischer Speicherung).
+3. **JSON Upload & Download:** Über „↑ JSON hochladen“ (oder Drag-and-drop einer JSON-Datei) und „↓ JSON herunterladen“ können vollständige Lastenheft-Dateien jederzeit manuell importiert und exportiert werden.
+4. **Tab-Synchronisation:** Änderungen, die in einem anderen Tab desselben Browsers gespeichert werden, werden über Browser-Events erkannt und synchronisiert.
+5. **Wiederherstellung:** Ungespeicherte Entwürfe werden automatisch im Browser zwischengespeichert und beim erneuten Laden zur Wiederherstellung angeboten.
 
 ## Dateien und KI-Bearbeitung
 
-Die Standardvorlage liegt in `data/lastenheft.json`. `lastenheft.schema.json` beschreibt das Format. KIs können diese JSON-Datei ändern und über „JSON hochladen“ bzw. die Testumgebung nutzen.
+Die Standardvorlage liegt in `data/lastenheft.json`. `lastenheft.schema.json` beschreibt das Format. KIs und externe Agenten können diese oder jede andere lokale JSON-Datei direkt auf der Festplatte bearbeiten – die geöffnete Web-App übernimmt die Änderungen ohne Neuladen oder manuellen Dateiupload in Echtzeit:
+
+- **Lokaler Server (`npm start`):** Bei Verwendung des lokalen Servers synchronisiert die Web-App automatisch und unmittelbar mit `data/lastenheft.json`. Jede Bearbeitung im Browser wird sofort auf der Festplatte gespeichert; jede Änderung durch KIs/Agenten an `data/lastenheft.json` wird sofort im Browser sichtbar.
+- **File System Access API:** Über „📂 Lokale Datei öffnen …“ oder den Start-Dialog kann jede beliebige JSON-Datei auf der Festplatte für bidirektionale Live-Synchronisation angebunden werden.
 
 1. `schemaVersion` bleibt `1`.
 2. Genau ein Element vom Typ `document` hat `parentId: null`. Sein Titel und `document.title` sollen identisch sein.

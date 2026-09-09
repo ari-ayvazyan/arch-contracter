@@ -8,6 +8,8 @@ let undo = [], redo = [], zoom = 1, pan = { x: 45, y: 70 }, positions = new Map(
 const nodeOffsets = new Map();
 let nodeDrag = null, ignoreNodeClickUntil = 0;
 let dependencyDraft = null;
+let fileHandle = null, lastKnownFileText = null, lastKnownFileModified = 0, lastKnownFileSize = 0, watcherTimer = null, isWriting = false;
+let serverRevision = null, serverConnected = false, isCheckingExternal = false, permissionChecked = false;
 const storageKey = `arch-contracter-data${location.port ? `:${location.port}` : ''}`;
 const draftKey = `arch-contracter-draft${location.port ? `:${location.port}` : ''}`;
 const clone = value => structuredClone(value);
@@ -19,48 +21,457 @@ const contracts = () => [...new Set(data.nodes.map(n => effectiveContract(data, 
 const isEditing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
 let toastTimer;
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').hidden = true, 4500); }
-function notice(message) { $('#notice').hidden = !message; $('#notice').innerHTML = message ? `<span>${e(message)}</span><button data-action="reload">Stand laden</button><button data-action="download">JSON herunterladen</button>` : ''; }
+function notice(message, buttons = null) {
+  if (!message) {
+    $('#notice').hidden = true;
+    $('#notice').innerHTML = '';
+    return;
+  }
+  $('#notice').hidden = false;
+  const defaultButtons = '<button data-action="reload">Stand laden</button><button data-action="download">JSON herunterladen</button>';
+  $('#notice').innerHTML = `<span>${typeof message === 'string' && !message.includes('<span') ? e(message) : message}</span>${buttons || defaultButtons}`;
+}
 function backup() { try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { toast('Lokale Wiederherstellung nicht verfügbar. Bitte speichern.'); } }
 function updateSaveStatus() {
-  $('#save-status').textContent = !data ? 'Kein Dokument' : saving ? 'Speichert …' : conflict ? 'Konflikt' : dirty ? 'Ungespeichert' : '✓ Gespeichert';
-  $('#save-status').classList.toggle('dirty', dirty || conflict);
-  $('#save').disabled = saving || !data;
+  const statusText = !data ? 'Kein Dokument' : (saving || dirty) ? 'Speichert …' : conflict ? 'Konflikt' : fileHandle ? '✓ Synchronisiert' : '✓ Gespeichert';
+  $('#save-status').textContent = statusText;
+  $('#save-status').title = fileHandle ? `Synchronisiert direkt mit ${fileHandle.name}` : serverConnected ? 'Synchronisiert direkt mit data/lastenheft.json auf der Festplatte' : 'Im Browser gespeichert';
+  $('#save-status').classList.toggle('dirty', conflict);
   const editBtn = $('#document-edit');
   if (editBtn) editBtn.disabled = !data;
   const previewBtn = $('#preview');
   if (previewBtn) previewBtn.disabled = !data;
 }
+function updateStorageUI() {
+  const modeLabel = $('#storage-mode-label');
+  const nameEl = $('#file-storage-name');
+  const descEl = $('#file-storage-desc');
+  const dotEl = $('#file-indicator-dot');
+  const disconnectBtn = $('#fs-disconnect');
+  const hintEl = $('#storage-hint');
+  const hasFs = 'showOpenFilePicker' in window;
+
+  const openBtn = $('#fs-open');
+  const saveAsBtn = $('#fs-save-as');
+  if (openBtn) openBtn.hidden = !hasFs;
+  if (saveAsBtn) saveAsBtn.hidden = !hasFs;
+
+  let choice = null;
+  try { choice = localStorage.getItem('arch-contracter-fs-choice'); } catch {}
+
+  if (fileHandle) {
+    if (modeLabel) modeLabel.textContent = `DATEI: ${fileHandle.name.toUpperCase()}`;
+    if (nameEl) nameEl.textContent = fileHandle.name;
+    if (descEl) descEl.textContent = 'Live-Sync aktiv';
+    if (dotEl) {
+      dotEl.classList.add('synced');
+      dotEl.title = `Synchronisiert direkt mit ${fileHandle.name}`;
+    }
+    if (disconnectBtn) disconnectBtn.hidden = false;
+    if (hintEl) hintEl.textContent = `Synchronisiert direkt mit ${fileHandle.name}. Externe Dateiänderungen werden laufend überwacht und sofort geladen.`;
+  } else if (serverConnected && choice !== 'browser') {
+    if (modeLabel) modeLabel.textContent = 'DATEI: DATA/LASTENHEFT.JSON';
+    if (nameEl) nameEl.textContent = 'data/lastenheft.json';
+    if (descEl) descEl.textContent = 'Live-Sync aktiv (Server)';
+    if (dotEl) {
+      dotEl.classList.add('synced');
+      dotEl.title = 'Synchronisiert direkt mit data/lastenheft.json auf der Festplatte';
+    }
+    if (disconnectBtn) disconnectBtn.hidden = true;
+    if (hintEl) hintEl.textContent = 'Synchronisiert direkt mit data/lastenheft.json auf der Festplatte. Externe Änderungen (z. B. durch KI-Agenten) werden sofort übernommen.';
+  } else {
+    if (modeLabel) modeLabel.textContent = 'BROWSER-SPEICHER';
+    if (nameEl) nameEl.textContent = 'Browser-Speicher';
+    if (descEl) descEl.textContent = serverConnected ? 'Server-Sync im Hintergrund aktiv' : 'Lokale Datenquelle';
+    if (dotEl) {
+      dotEl.classList.toggle('synced', serverConnected);
+      dotEl.title = serverConnected ? 'In data/lastenheft.json synchronisiert' : 'Im Browser gespeichert';
+    }
+    if (disconnectBtn) disconnectBtn.hidden = true;
+    if (hintEl) hintEl.textContent = serverConnected ? 'Daten werden im Browser und direkt in data/lastenheft.json auf der Festplatte gespeichert.' : 'Daten werden lokal im Browser gespeichert. Kein Konto. Keine Cloud.';
+  }
+}
+
+const DB_NAME = 'arch-contracter-fs';
+const STORE_NAME = 'handles';
+const KEY_ACTIVE_HANDLE = 'activeFileHandle';
+
+function openFsDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE_NAME)) {
+        req.result.createObjectStore(STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getStoredHandle() {
+  try {
+    const db = await openFsDb();
+    return new Promise(resolve => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(KEY_ACTIVE_HANDLE);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function setStoredHandle(handle) {
+  try {
+    const db = await openFsDb();
+    return new Promise(resolve => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      if (handle) tx.objectStore(STORE_NAME).put(handle, KEY_ACTIVE_HANDLE);
+      else tx.objectStore(STORE_NAME).delete(KEY_ACTIVE_HANDLE);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function checkExternalChanges() {
+  if (isWriting || isCheckingExternal) return;
+  isCheckingExternal = true;
+  try {
+    if (fileHandle) {
+      const file = await fileHandle.getFile();
+      if (file.lastModified === lastKnownFileModified && file.size === lastKnownFileSize) {
+        return;
+      }
+      const text = await file.text();
+      if (text === lastKnownFileText) {
+        lastKnownFileModified = file.lastModified;
+        lastKnownFileSize = file.size;
+        return;
+      }
+
+      let updated;
+      try {
+        updated = JSON.parse(text);
+        validate(updated);
+      } catch {
+        return;
+      }
+
+      lastKnownFileModified = file.lastModified;
+      lastKnownFileSize = file.size;
+      lastKnownFileText = text;
+
+      if (dirty) {
+        undo.push(clone(data));
+        if (undo.length > 80) undo.shift();
+      }
+
+      data = updated;
+      dirty = false;
+      conflict = false;
+      try {
+        localStorage.setItem(storageKey, text);
+        localStorage.removeItem(draftKey);
+      } catch {}
+
+      if (!selectedNode()) selected = root()?.id || null;
+      notice('');
+      updateSaveStatus();
+      renderOverview();
+      renderInspector();
+      toast(`Externe Änderung aus „${fileHandle.name}“ sofort übernommen.`);
+      return;
+    }
+
+    if (serverConnected) {
+      const response = await fetch('/api/document');
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.revision || payload.revision === serverRevision) return;
+      validate(payload.data);
+      serverRevision = payload.revision;
+
+      if (dirty) {
+        undo.push(clone(data));
+        if (undo.length > 80) undo.shift();
+      }
+
+      data = payload.data;
+      dirty = false;
+      conflict = false;
+      try {
+        const text = JSON.stringify(data, null, 2) + '\n';
+        localStorage.setItem(storageKey, text);
+        localStorage.removeItem(draftKey);
+      } catch {}
+
+      if (!selectedNode()) selected = root()?.id || null;
+      notice('');
+      updateSaveStatus();
+      renderOverview();
+      renderInspector();
+      toast('Externe Änderung in „data/lastenheft.json“ sofort übernommen.');
+    }
+  } catch {} finally {
+    isCheckingExternal = false;
+  }
+}
+
+function startWatcher() {
+  stopWatcher();
+  if (!fileHandle && !serverConnected) return;
+  watcherTimer = setInterval(checkExternalChanges, fileHandle ? 500 : 1000);
+}
+
+function stopWatcher() {
+  if (watcherTimer) {
+    clearInterval(watcherTimer);
+    watcherTimer = null;
+  }
+}
+
+async function openLocalFile() {
+  if (!('showOpenFilePicker' in window)) {
+    toast('File System Access API wird von diesem Browser nicht unterstützt.');
+    return false;
+  }
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      types: [{ description: 'JSON-Lastenheft (*.json)', accept: { 'application/json': ['.json'] } }],
+      excludeAcceptAllOption: false,
+      multiple: false
+    });
+    if (!handle) return false;
+
+    const file = await handle.getFile();
+    const text = await file.text();
+    let imported;
+    try {
+      imported = JSON.parse(text);
+    } catch {
+      throw new Error('Die Datei enthält kein gültiges JSON.');
+    }
+    validate(imported);
+
+    if (dirty && !confirm('Ungespeicherte Änderungen werden überschrieben. Fortfahren?')) return false;
+
+    fileHandle = handle;
+    await setStoredHandle(handle);
+    try { localStorage.setItem('arch-contracter-fs-choice', 'file'); } catch {}
+
+    lastKnownFileModified = file.lastModified;
+    lastKnownFileSize = file.size;
+    lastKnownFileText = text;
+
+    data = imported;
+    try {
+      localStorage.setItem(storageKey, text);
+      localStorage.removeItem(draftKey);
+    } catch {}
+
+    dirty = false;
+    conflict = false;
+    undo = [];
+    redo = [];
+    selected = root()?.id || null;
+    notice('');
+    updateSaveStatus();
+    updateStorageUI();
+    renderOverview();
+    renderInspector();
+    fit();
+    startWatcher();
+
+    toast(`„${handle.name}“ geöffnet. Externe Änderungen werden laufend überwacht.`);
+    return true;
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      toast(`Fehler beim Öffnen: ${error.message}`);
+    }
+    return false;
+  }
+}
+
+async function saveLocalFileAs() {
+  if (!('showSaveFilePicker' in window)) {
+    toast('File System Access API wird von diesem Browser nicht unterstützt.');
+    return false;
+  }
+  try {
+    if (!data) return false;
+    validate(data);
+
+    const slug = (data?.document?.title || 'lastenheft')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9äöüß_-]+/gi, '-')
+      .replace(/^-+|-+$/g, '') || 'lastenheft';
+
+    const handle = await window.showSaveFilePicker({
+      suggestedName: `${slug}.json`,
+      types: [{ description: 'JSON-Lastenheft (*.json)', accept: { 'application/json': ['.json'] } }]
+    });
+    if (!handle) return false;
+
+    const raw = JSON.stringify(data, null, 2) + '\n';
+    isWriting = true;
+    try {
+      const writable = await handle.createWritable();
+      await writable.write(raw);
+      await writable.close();
+
+      const f = await handle.getFile();
+      lastKnownFileModified = f.lastModified;
+      lastKnownFileSize = f.size;
+      lastKnownFileText = raw;
+    } finally {
+      isWriting = false;
+    }
+
+    fileHandle = handle;
+    await setStoredHandle(handle);
+    try { localStorage.setItem('arch-contracter-fs-choice', 'file'); } catch {}
+
+    try {
+      localStorage.setItem(storageKey, raw);
+      localStorage.removeItem(draftKey);
+    } catch {}
+
+    dirty = false;
+    conflict = false;
+    notice('');
+    updateSaveStatus();
+    updateStorageUI();
+    startWatcher();
+
+    toast(`In „${handle.name}“ gespeichert. Live-Synchronisation aktiv.`);
+    return true;
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      toast(`Fehler beim Speichern: ${error.message}`);
+    }
+    return false;
+  }
+}
+
+async function disconnectFile() {
+  if (!fileHandle) return;
+  const oldName = fileHandle.name;
+  stopWatcher();
+  fileHandle = null;
+  lastKnownFileText = null;
+  lastKnownFileModified = 0;
+  lastKnownFileSize = 0;
+  await setStoredHandle(null);
+  try { localStorage.setItem('arch-contracter-fs-choice', 'browser'); } catch {}
+  updateStorageUI();
+  updateSaveStatus();
+  if (serverConnected) startWatcher();
+  toast(`Dateiverknüpfung zu „${oldName}“ getrennt. Daten verbleiben im Browser-Speicher.`);
+}
+
+let autoSaveTimer = null;
+let needsSubsequentSave = false;
+
+function queueSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    save();
+  }, 100);
+}
+
 function checkpoint() { undo.push(clone(data)); if (undo.length > 80) undo.shift(); redo = []; }
-function changed() { dirty = true; backup(); updateSaveStatus(); renderOverview(); }
+function changed(immediate = false) {
+  dirty = true;
+  backup();
+  updateSaveStatus();
+  renderOverview();
+  if (immediate) {
+    clearTimeout(autoSaveTimer);
+    save();
+  } else {
+    queueSave();
+  }
+}
 function mutate(fn, inspect = true) {
   const previous = clone(data);
-  try { fn(); validate(data); undo.push(previous); if (undo.length > 80) undo.shift(); redo = []; changed(); if (inspect) renderInspector(); }
+  try {
+    fn();
+    validate(data);
+    undo.push(previous);
+    if (undo.length > 80) undo.shift();
+    redo = [];
+    changed(true);
+    if (inspect) renderInspector();
+  }
   catch (error) { data = previous; toast(error.message); }
 }
 async function load(force = false) {
   if (data && dirty && !force && !confirm('Ungespeicherte Änderungen verwerfen und den gespeicherten Stand laden? Sichere bei Bedarf zuerst den JSON-Entwurf.')) return;
   try {
-    let raw = null;
-    try { raw = localStorage.getItem(storageKey); } catch {}
-    let loadedData = null;
-    if (raw) {
+    if (fileHandle) {
       try {
-        loadedData = JSON.parse(raw);
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        const loadedData = JSON.parse(text);
         validate(loadedData);
-      } catch {
-        loadedData = null;
+        data = loadedData;
+        lastKnownFileModified = file.lastModified;
+        lastKnownFileSize = file.size;
+        lastKnownFileText = text;
+        try {
+          localStorage.setItem(storageKey, text);
+          localStorage.removeItem(draftKey);
+        } catch {}
+        dirty = false;
+        conflict = false;
+        undo = [];
+        redo = [];
+        selected = data ? root()?.id : null;
+        notice('');
+        updateSaveStatus();
+        renderOverview();
+        renderInspector();
+        if (data) fit();
+        toast(`Stand aus „${fileHandle.name}“ geladen.`);
+        return;
+      } catch (fileErr) {
+        toast(`Fehler beim Lesen der verknüpften Datei: ${fileErr.message}`);
       }
     }
 
+    let loadedData = null;
+    try {
+      const response = await fetch('/api/document');
+      if (response.ok) {
+        const payload = await response.json();
+        validate(payload.data);
+        loadedData = payload.data;
+        serverRevision = payload.revision;
+        serverConnected = true;
+      } else {
+        serverConnected = false;
+      }
+    } catch {
+      serverConnected = false;
+    }
+
     if (!loadedData) {
-      try {
-        const response = await fetch('/api/document');
-        if (response.ok) {
-          const payload = await response.json();
-          validate(payload.data);
-          loadedData = payload.data;
+      let raw = null;
+      try { raw = localStorage.getItem(storageKey); } catch {}
+      if (raw) {
+        try {
+          loadedData = JSON.parse(raw);
+          validate(loadedData);
+        } catch {
+          loadedData = null;
         }
-      } catch {}
+      }
     }
 
     if (!loadedData) {
@@ -81,30 +492,96 @@ async function load(force = false) {
     selected = data ? root().id : null;
     notice('');
     updateSaveStatus();
+    updateStorageUI();
     renderOverview();
     renderInspector();
     if (data) fit();
+    if (serverConnected) startWatcher();
   } catch (error) {
     notice(`Daten konnten nicht geladen werden: ${error.message}`);
   }
 }
 async function save() {
-  if (!data || saving) return;
-  try { validate(data); } catch (error) { return toast(error.message); }
+  if (!data) return;
+  if (saving) {
+    needsSubsequentSave = true;
+    return;
+  }
+  try { validate(data); } catch (error) { return; }
   saving = true; updateSaveStatus();
   try {
-    const raw = JSON.stringify(data);
-    localStorage.setItem(storageKey, raw);
-    try { localStorage.removeItem(draftKey); } catch {}
-    dirty = false;
-    conflict = false;
-    notice('');
-    toast('Im Browser-Speicher gespeichert.');
+    const raw = JSON.stringify(data, null, 2) + '\n';
+    if (fileHandle) {
+      isWriting = true;
+      try {
+        const writable = await fileHandle.createWritable();
+        await writable.write(raw);
+        await writable.close();
+        const f = await fileHandle.getFile();
+        lastKnownFileModified = f.lastModified;
+        lastKnownFileSize = f.size;
+        lastKnownFileText = raw;
+      } finally {
+        isWriting = false;
+      }
+      try {
+        localStorage.setItem(storageKey, raw);
+        localStorage.removeItem(draftKey);
+      } catch {}
+      dirty = false;
+      conflict = false;
+      notice('');
+    } else if (serverConnected) {
+      isWriting = true;
+      try {
+        const response = await fetch('/api/document', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data, revision: serverRevision })
+        });
+        if (response.ok) {
+          const resPayload = await response.json();
+          serverRevision = resPayload.revision;
+          dirty = false;
+          conflict = false;
+          notice('');
+        } else if (response.status === 409) {
+          conflict = true;
+          notice('Die Datei „data/lastenheft.json“ wurde außerhalb des Editors geändert. Lade den Dateistand neu oder sichere zuerst deinen Entwurf.');
+        } else {
+          const errPayload = await response.json().catch(() => ({}));
+          throw new Error(errPayload.error || `Serverfehler (${response.status})`);
+        }
+      } finally {
+        isWriting = false;
+      }
+      try {
+        localStorage.setItem(storageKey, raw);
+        localStorage.removeItem(draftKey);
+      } catch {}
+    } else {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      try { localStorage.removeItem(draftKey); } catch {}
+      dirty = false;
+      conflict = false;
+      notice('');
+    }
   } catch (error) {
-    notice(`Speichern im Browser fehlgeschlagen: ${error.message}`);
+    notice(
+      fileHandle
+        ? `Speichern in „${fileHandle.name}“ fehlgeschlagen: ${error.message}`
+        : serverConnected
+        ? `Speichern in Datei fehlgeschlagen: ${error.message}`
+        : `Speichern im Browser fehlgeschlagen: ${error.message}`,
+      fileHandle ? '<button data-action="reconnect-file" class="primary">Zugriff freigeben & speichern</button><button data-action="download">JSON herunterladen</button>' : null
+    );
   } finally {
     saving = false;
     updateSaveStatus();
+    if (needsSubsequentSave) {
+      needsSubsequentSave = false;
+      save();
+    }
   }
 }
 function download() {
@@ -133,13 +610,7 @@ async function uploadFile(file) {
     validate(imported);
     if (dirty && !confirm('Ungespeicherte Änderungen werden überschrieben. Fortfahren?')) return;
     data = imported;
-    try {
-      const raw = JSON.stringify(data);
-      localStorage.setItem(storageKey, raw);
-      localStorage.removeItem(draftKey);
-    } catch {}
-    dirty = false;
-    conflict = false;
+    await save();
     undo = [];
     redo = [];
     selected = root().id;
@@ -159,24 +630,8 @@ async function uploadFile(file) {
 async function resetToDefault() {
   if (!confirm('Möchtest du wirklich alle Änderungen verwerfen und auf das Standard-Beispieldokument zurücksetzen? Ungespeicherte Änderungen gehen verloren. Sichere bei Bedarf zuerst deinen aktuellen Stand.')) return;
   try {
-    let defaultData = null;
-    try {
-      const response = await fetch('/api/document');
-      if (response.ok) {
-        const payload = await response.json();
-        validate(payload.data);
-        defaultData = payload.data;
-      }
-    } catch {}
-    if (!defaultData) defaultData = clone(defaultTemplate);
-    data = defaultData;
-    try {
-      const raw = JSON.stringify(data);
-      localStorage.setItem(storageKey, raw);
-      localStorage.removeItem(draftKey);
-    } catch {}
-    dirty = false;
-    conflict = false;
+    data = clone(defaultTemplate);
+    await save();
     undo = [];
     redo = [];
     selected = root().id;
@@ -244,11 +699,7 @@ async function createDocument({ title, templateType }) {
   validate(newDoc);
 
   data = newDoc;
-  const raw = JSON.stringify(data);
-  try {
-    localStorage.setItem(storageKey, raw);
-    localStorage.removeItem(draftKey);
-  } catch {}
+  await save();
 
   dirty = false;
   conflict = false;
@@ -266,7 +717,7 @@ async function createDocument({ title, templateType }) {
   renderOverview();
   renderInspector();
   fit();
-  toast(`„${docTitle}“ erfolgreich erstellt.`);
+  toast(templateType === 'blank' ? 'Neues leeres Lastenheft erstellt.' : 'Neues Lastenheft aus Vorlage erstellt.');
   return true;
 }
 
@@ -521,7 +972,7 @@ function editNodeTitle(key, animate = false) {
     if (finished) return; finished = true;
     n.title = cancel ? original : input.value.trim() || original;
     if (n.parentId === null) data.document.title = n.title;
-    backup();
+    changed(true);
     const label = document.createElement('span'); label.className = 'node-title'; label.textContent = n.title;
     input.replaceWith(label); card.draggable = n.parentId !== null;
     // Let an outside click reach its original target before rebuilding the tree.
@@ -531,7 +982,7 @@ function editNodeTitle(key, animate = false) {
     if (!recorded) { checkpoint(); recorded = true; }
     n.title = input.value.trim() || original;
     if (n.parentId === null) data.document.title = n.title;
-    dirty = true; backup(); updateSaveStatus();
+    changed();
   });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); finish(event.key === 'Escape'); card.focus({ preventScroll: true }); }
@@ -696,7 +1147,7 @@ document.addEventListener('click', event => {
   if (b.dataset.deleteLink) return mutate(() => data.links = data.links.filter(l => l.id !== b.dataset.deleteLink));
   if (b.dataset.resolve) return mutate(() => node(b.dataset.owner).questions.find(q => q.id === b.dataset.resolve).status = 'resolved');
   const action = b.dataset.action;
-  if (action === 'reload') return load(); if (action === 'download') return download();
+  if (action === 'reload') return load(); if (action === 'download') return download(); if (action === 'reconnect-file') return reconnectFile();
   if (action === 'close-inspector') { selected = null; renderOverview(); renderInspector(); return; }
   if (action === 'add-child') return addChild(selected, b);
   if (action === 'add-question') { mutate(() => selectedNode().questions.push({ id: id('q'), text: 'Neue Frage', answer: '', status: 'open' })); const inputs = $('#inspector').querySelectorAll('[data-qfield="text"]'); inputs[inputs.length - 1]?.focus(); inputs[inputs.length - 1]?.select(); return; }
@@ -720,8 +1171,9 @@ $('#inspector').addEventListener('change', event => {
     if (input.dataset.question) mutate(() => n.questions.find(q => q.id === input.dataset.question)[input.dataset.qfield] = input.value);
     else if (input.dataset.field === 'parentId') mutate(() => moveNode(data, n.id, input.value));
   } else if (input.matches('[data-field],[data-question]')) {
-    if ((input.dataset.field === 'title' || input.dataset.qfield === 'text') && !input.value.trim()) { input.value = input.dataset.original?.trim() || (input.dataset.field ? 'Ohne Titel' : 'Offene Frage'); if (input.dataset.field) { n.title = input.value; if (n.parentId === null) data.document.title = input.value; } else n.questions.find(q => q.id === input.dataset.question).text = input.value; toast('Ein Titel bzw. Fragetext darf nicht leer sein.'); changed(); }
+    if ((input.dataset.field === 'title' || input.dataset.qfield === 'text') && !input.value.trim()) { input.value = input.dataset.original?.trim() || (input.dataset.field ? 'Ohne Titel' : 'Offene Frage'); if (input.dataset.field) { n.title = input.value; if (n.parentId === null) data.document.title = input.value; } else n.questions.find(q => q.id === input.dataset.question).text = input.value; toast('Ein Titel bzw. Fragetext darf nicht leer sein.'); }
     delete input.dataset.checkpoint;
+    changed(true);
   }
 });
 $('#nodes').addEventListener('click', event => { if (performance.now() < ignoreNodeClickUntil || event.target.closest('button,input')) return; const element = event.target.closest('[data-node]'); if (element) select(element.dataset.node); });
@@ -771,7 +1223,6 @@ for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) $('#can
 $('#canvas').addEventListener('wheel', event => { event.preventDefault(); const rect = $('#canvas').getBoundingClientRect(); if (event.ctrlKey || event.metaKey) setZoom(zoom * Math.exp(-event.deltaY * .003), event.clientX - rect.left, event.clientY - rect.top); else { pan.x -= event.deltaX; pan.y -= event.deltaY; transform(); } }, { passive: false });
 $('#search').oninput = event => { search = event.target.value.toLocaleLowerCase('de'); renderOverview(); if (search) fit(); };
 $('#mobile-scope').onchange = event => { scope = event.target.value; renderOverview(); fit(); };
-$('#save').onclick = save;
 $('#reload').onclick = () => load();
 $('#download').onclick = download;
 $('#upload').onclick = () => $('#upload-input')?.click();
@@ -793,13 +1244,98 @@ $('#new-doc-form')?.addEventListener('submit', async event => {
   const success = await createDocument({ title, templateType });
   if (success) $('#new-doc-dialog').close();
 });
+
+async function reconnectFile() {
+  if (!fileHandle) return;
+  try {
+    const perm = await fileHandle.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      updateStorageUI();
+      notice('');
+      toast(`Verbindung zu „${fileHandle.name}“ wiederhergestellt.`);
+      if (dirty) {
+        await save();
+      } else {
+        await load(true);
+      }
+      startWatcher();
+    }
+  } catch (err) {
+    toast(`Freigabe fehlgeschlagen: ${err.message}`);
+  }
+}
+
+$('#notice')?.addEventListener('click', event => {
+  const action = event.target.dataset.action;
+  if (action === 'reload') return load();
+  if (action === 'download') return download();
+  if (action === 'reconnect-file') return reconnectFile();
+  if (action === 'disconnect-file') return disconnectFile();
+});
+
+$('#fs-open')?.addEventListener('click', () => openLocalFile());
+$('#fs-save-as')?.addEventListener('click', () => saveLocalFileAs());
+$('#fs-disconnect')?.addEventListener('click', () => disconnectFile());
+$('#fs-dialog-open-btn')?.addEventListener('click', async () => {
+  const ok = await openLocalFile();
+  if (ok) $('#fs-picker-dialog')?.close();
+});
+$('#fs-dialog-create-btn')?.addEventListener('click', async () => {
+  const ok = await saveLocalFileAs();
+  if (ok) $('#fs-picker-dialog')?.close();
+});
+$('#fs-dialog-browser-btn')?.addEventListener('click', () => {
+  try { localStorage.setItem('arch-contracter-fs-choice', 'browser'); } catch {}
+  $('#fs-picker-dialog')?.close();
+});
+$('#close-fs-dialog')?.addEventListener('click', () => {
+  try { localStorage.setItem('arch-contracter-fs-choice', 'browser'); } catch {}
+  $('#fs-picker-dialog')?.close();
+});
+$('#cancel-fs-dialog')?.addEventListener('click', () => {
+  try { localStorage.setItem('arch-contracter-fs-choice', 'browser'); } catch {}
+  $('#fs-picker-dialog')?.close();
+});
+$('#fs-picker-dialog')?.addEventListener('click', event => {
+  if (event.target === $('#fs-picker-dialog')) {
+    try { localStorage.setItem('arch-contracter-fs-choice', 'browser'); } catch {}
+    $('#fs-picker-dialog')?.close();
+  }
+});
+
+async function checkPendingFilePermission() {
+  if (permissionChecked || !fileHandle) return;
+  try {
+    const q = await fileHandle.queryPermission({ mode: 'readwrite' });
+    if (q === 'prompt') {
+      permissionChecked = true;
+      const req = await fileHandle.requestPermission({ mode: 'readwrite' });
+      if (req === 'granted') {
+        notice('');
+        updateStorageUI();
+        if (dirty) save();
+      }
+    } else if (q === 'granted') {
+      permissionChecked = true;
+    }
+  } catch {}
+}
+window.addEventListener('click', checkPendingFilePermission);
+
+window.addEventListener('focus', () => {
+  if ((fileHandle || serverConnected) && !isWriting) checkExternalChanges();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (fileHandle || serverConnected) && !isWriting) checkExternalChanges();
+});
+
 $('#preview').onclick = () => { if (data) openExport(); }; $('#close-export').onclick = () => $('#export-dialog').close();
 $('#export-scope').onchange = renderExport; $('#export-questions').onchange = renderExport; $('#print').onclick = () => window.print();
 $('#fit').onclick = fit; $('#zoom-in').onclick = () => setZoom(zoom * 1.2); $('#zoom-out').onclick = () => setZoom(zoom / 1.2);
 $('#reset-layout').onclick = () => { nodeOffsets.clear(); renderMap(); fit(); };
 $('#fullscreen').onclick = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { toast('Vollbild ist in diesem Browser nicht verfügbar.'); } };
-document.addEventListener('keydown', event => { if (!(event.ctrlKey || event.metaKey)) return; if (event.key.toLowerCase() === 's') { event.preventDefault(); document.activeElement?.blur(); save(); } else if (event.key.toLowerCase() === 'z' && !isEditing() && !document.querySelector('dialog[open]')) { event.preventDefault(); history(event.shiftKey ? 'redo' : 'undo'); } });
-window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
+document.addEventListener('keydown', event => { if (!(event.ctrlKey || event.metaKey)) return; if (event.key.toLowerCase() === 's') { event.preventDefault(); document.activeElement?.blur(); clearTimeout(autoSaveTimer); save(); } else if (event.key.toLowerCase() === 'z' && !isEditing() && !document.querySelector('dialog[open]')) { event.preventDefault(); history(event.shiftKey ? 'redo' : 'undo'); } });
+window.addEventListener('beforeunload', event => { stopWatcher(); if (dirty) { clearTimeout(autoSaveTimer); save(); } });
 window.addEventListener('beforeprint', () => { if (data && !$('#export-dialog').open) { $('#export-scope').innerHTML = '<option value="*">Gesamtes Lastenheft</option>'; renderExport(); } });
 window.addEventListener('dragover', event => {
   if (event.dataTransfer?.types?.includes('Files')) {
@@ -837,13 +1373,34 @@ window.addEventListener('storage', event => {
     }
   } catch {}
 });
+
+if ('showOpenFilePicker' in window) {
+  try {
+    const stored = await getStoredHandle();
+    if (stored) {
+      let perm = 'prompt';
+      try { perm = await stored.queryPermission({ mode: 'readwrite' }); } catch {}
+      if (perm === 'granted') {
+        fileHandle = stored;
+        startWatcher();
+      } else {
+        fileHandle = stored;
+        startWatcher();
+        notice(`Verbindung zu „${stored.name}“ wiederhergestellt. Klicke auf „Freigeben“, um Schreibzugriff zu aktivieren.`, '<button data-action="reconnect-file" class="primary">Freigeben</button><button data-action="disconnect-file" class="quiet">Trennen</button>');
+      }
+    }
+  } catch {}
+}
+
 let recovered;
 try {
   const rawDraft = localStorage.getItem(draftKey);
   if (rawDraft) recovered = JSON.parse(rawDraft);
 } catch {}
 await load(true);
-if (recovered && data) {
+updateStorageUI();
+
+if (recovered && data && !fileHandle) {
   try {
     validate(recovered);
     if (JSON.stringify(recovered) !== JSON.stringify(data) && confirm('Ein ungespeicherter Entwurf wurde gefunden. Wiederherstellen?')) {
@@ -863,3 +1420,24 @@ if (recovered && data) {
     toast('Der gespeicherte Entwurf konnte nicht wiederhergestellt werden.');
   }
 }
+
+// First open check: if File System Access is supported, prompt user on initial visit
+if ('showOpenFilePicker' in window && !fileHandle && !navigator.webdriver) {
+  try {
+    const choice = localStorage.getItem('arch-contracter-fs-choice');
+    if (!choice) {
+      $('#fs-picker-dialog')?.showModal();
+    }
+  } catch {}
+}
+
+window.__fsAccess = {
+  get fileHandle() { return fileHandle; },
+  set fileHandle(h) { fileHandle = h; updateStorageUI(); updateSaveStatus(); startWatcher(); },
+  get serverConnected() { return serverConnected; },
+  get serverRevision() { return serverRevision; },
+  openLocalFile,
+  saveLocalFileAs,
+  disconnectFile,
+  checkExternalChanges
+};
