@@ -54,6 +54,23 @@ test('PDF-Inhalt schließt interne Angaben aus und maskiert HTML', () => {
   html = documentHtml(d, '*', false); assert.ok(!html.includes('Welche Standardrollen'));
   html = documentHtml(d, 'Erweiterungen'); assert.ok(!html.includes('id="doc-rollen-rechte"')); assert.ok(html.includes('Voraussetzungen außerhalb')); assert.ok(html.includes('CRM-Anbindung'));
 });
+test('PDF zeigt keinen Platzhalter für fehlende Beschreibungen', () => {
+  assert.ok(!documentHtml(fresh()).includes('Beschreibung noch offen.'));
+});
+test('Beantwortete Fragen stehen direkt am Ende ihres PDF-Abschnitts', () => {
+  const d = fresh(), n = d.nodes.find(n => n.id === 'rollen-rechte');
+  n.questions.push(
+    { id: 'beantwortet', text: 'Ist das geklärt?', answer: 'Ja, vollständig.', status: 'resolved', visibility: 'customer' },
+    { id: 'intern-beantwortet', text: 'INTERNE_FRAGE', answer: 'INTERNE_ANTWORT', status: 'resolved', visibility: 'internal' }
+  );
+  const html = documentHtml(d, '*', false);
+  const section = html.match(/<section class="doc-section" id="doc-rollen-rechte">([\s\S]*?)<\/section>/)?.[1] || '';
+  assert.ok(section.includes('<h3>Beantwortete Fragen</h3>'));
+  assert.ok(section.includes('Ist das geklärt?'));
+  assert.ok(section.includes('Ja, vollständig.'));
+  assert.ok(!html.includes('INTERNE_FRAGE'));
+  assert.ok(!html.includes('INTERNE_ANTWORT'));
+});
 test('Nummerierung bleibt eindeutig, wenn dazwischenliegende Gruppen einen anderen Vertrag haben', () => {
   const d = fresh();
   d.nodes.find(n => n.id === 'basisprojekt').contract = 'Gemeinsam';
